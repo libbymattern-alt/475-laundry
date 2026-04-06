@@ -118,7 +118,7 @@ function ClaimModal({ activeSessions, onClaim, onDismiss }: any) {
 
   return (
     <div style={{ position: "fixed" as const, inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 1000 }}>
-      <div style={{ background: "var(--color-background-primary)", borderRadius: "var(--border-radius-lg) var(--border-radius-lg) 0 0", padding: "28px 24px", width: "100%", maxHeight: "80vh", overflowY: "auto" as const, border: "0.5px solid var(--color-border-tertiary)" }}>
+  <div style={{ background: "var(--color-background-tertiary)", borderRadius: "var(--border-radius-lg) var(--border-radius-lg) 0 0", padding: "28px 24px", width: "100%", maxHeight: "80vh", overflowY: "auto" as const, border: "0.5px solid var(--color-border-tertiary)" }}>
 
         <div style={{ fontSize: 22, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 6 }}>Who's doing laundry?</div>
         <div style={{ fontSize: 14, color: "var(--color-text-secondary)", marginBottom: 24 }}>A machine just started nearby.</div>
