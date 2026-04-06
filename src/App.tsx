@@ -117,10 +117,8 @@ function ClaimModal({ activeSessions, onClaim, onDismiss }: any) {
   };
 
   return (
-    <div style={{ position: "fixed" as const, inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-      <div style={{ background: "var(--color-background-primary)", borderRadius: "var(--border-radius-lg)", padding: "24px", width: 300, border: "0.5px solid var(--color-border-tertiary)" }}>
-        <div style={{ fontSize: 20, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 4 }}>Who's doing laundry?</div>
-        <div style={{ fontSize: 13, color: "var(--color-text-secondary)", marginBottom: 20 }}>A machine just started nearby.</div>
+   <div style={{ position: "fixed" as const, inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 1000 }}>
+  <div style={{ background: "var(--color-background-primary)", borderRadius: "var(--border-radius-lg) var(--border-radius-lg) 0 0", padding: "24px", width: "100%", maxHeight: "80vh", overflowY: "auto" as const, border: "0.5px solid var(--color-border-tertiary)" }}>
 
         <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 6 }}>Which machine?</div>
         <div style={{ display: "flex", flexDirection: "column" as const, gap: 8, marginBottom: 16 }}>
