@@ -117,40 +117,59 @@ function ClaimModal({ activeSessions, onClaim, onDismiss }: any) {
   };
 
   return (
-   <div style={{ position: "fixed" as const, inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 1000 }}>
-  <div style={{ background: "var(--color-background-primary)", borderRadius: "var(--border-radius-lg) var(--border-radius-lg) 0 0", padding: "24px", width: "100%", maxHeight: "80vh", overflowY: "auto" as const, border: "0.5px solid var(--color-border-tertiary)" }}>
+    <div style={{ position: "fixed" as const, inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 1000 }}>
+      <div style={{ background: "var(--color-background-primary)", borderRadius: "var(--border-radius-lg) var(--border-radius-lg) 0 0", padding: "28px 24px", width: "100%", maxHeight: "80vh", overflowY: "auto" as const, border: "0.5px solid var(--color-border-tertiary)" }}>
 
-        <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 6 }}>Which machine?</div>
-        <div style={{ display: "flex", flexDirection: "column" as const, gap: 8, marginBottom: 16 }}>
-          {activeSessions.map((s: any) => {
-            const machine = ALL_MACHINES.find(m => m.id === s.machineId);
-            const isWasher = machine?.type === "washer";
-            const accent = isWasher ? "#1D9E75" : "#BA7517";
-            const accentLight = isWasher ? "#E1F5EE" : "#FAEEDA";
-            const accentBorder = isWasher ? "#9FE1CB" : "#FAC775";
-            const selected = machineId === s.machineId;
+        <div style={{ fontSize: 22, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 6 }}>Who's doing laundry?</div>
+        <div style={{ fontSize: 14, color: "var(--color-text-secondary)", marginBottom: 24 }}>A machine just started nearby.</div>
+
+        {activeSessions.length > 1 && (
+          <>
+            <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-primary)", textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 10 }}>Which machine?</div>
+            <div style={{ display: "flex", flexDirection: "column" as const, gap: 8, marginBottom: 24 }}>
+              {activeSessions.map((s: any) => {
+                const machine = ALL_MACHINES.find(m => m.id === s.machineId);
+                const isWasher = machine?.type === "washer";
+                const accent = isWasher ? "#1D9E75" : "#BA7517";
+                const accentLight = isWasher ? "#E1F5EE" : "#FAEEDA";
+                const accentBorder = isWasher ? "#9FE1CB" : "#FAC775";
+                const selected = machineId === s.machineId;
+                return (
+                  <button key={s.machineId} onClick={() => setMachineId(s.machineId)} style={{ background: selected ? accentLight : "var(--color-background-secondary)", border: `2px solid ${selected ? accent : "var(--color-border-secondary)"}`, borderRadius: "var(--border-radius-md)", padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12, textAlign: "left" as const }}>
+                    <span style={{ fontSize: 24 }}>{isWasher ? "🫧" : "🌀"}</span>
+                    <div>
+                      <div style={{ fontSize: 15, fontWeight: 500, color: selected ? accent : "var(--color-text-primary)" }}>{machine?.label}</div>
+                      {s.cycleNum && <div style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>cycle {s.cycleNum}</div>}
+                    </div>
+                    {selected && <div style={{ marginLeft: "auto", fontSize: 18, color: accent }}>✓</div>}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-primary)", textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 10 }}>Select your apt number</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 28 }}>
+          {UNITS.map(u => {
+            const selected = unit === u;
             return (
-              <button key={s.machineId} onClick={() => setMachineId(s.machineId)} style={{ background: selected ? accentLight : "var(--color-background-secondary)", border: `0.5px solid ${selected ? accentBorder : "var(--color-border-tertiary)"}`, borderRadius: "var(--border-radius-md)", padding: "10px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, textAlign: "left" as const }}>
-                <span style={{ fontSize: 20 }}>{isWasher ? "🫧" : "🌀"}</span>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: selected ? accent : "var(--color-text-primary)" }}>{machine?.label}</div>
-                  {s.cycleNum && <div style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>cycle {s.cycleNum}</div>}
-                </div>
-                {selected && <div style={{ marginLeft: "auto", fontSize: 16, color: accent }}>✓</div>}
+              <button key={u} onClick={() => setUnit(u)} style={{ background: selected ? "#E1F5EE" : "var(--color-background-secondary)", border: `2px solid ${selected ? "#1D9E75" : "var(--color-border-secondary)"}`, borderRadius: "var(--border-radius-md)", padding: "12px 8px", cursor: "pointer", fontSize: 15, fontWeight: selected ? 500 : 400, color: selected ? "#1D9E75" : "var(--color-text-primary)", textAlign: "center" as const, transition: "all 0.15s" }}>
+                {u}
               </button>
             );
           })}
         </div>
 
-        <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 6 }}>Your unit</div>
-        <select value={unit} onChange={e => setUnit(e.target.value)} style={{ width: "100%", marginBottom: 16, background: "var(--color-background-secondary)", border: "0.5px solid var(--color-border-tertiary)", color: "var(--color-text-primary)", borderRadius: "var(--border-radius-md)", padding: "8px 10px", fontSize: 13 }}>
-          {UNITS.map(u => <option key={u} value={u}>Unit {u}</option>)}
-        </select>
-
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={onDismiss} style={{ flex: 1, background: "transparent", border: "0.5px solid var(--color-border-secondary)", color: "var(--color-text-secondary)", borderRadius: "var(--border-radius-md)", padding: "8px", cursor: "pointer", fontSize: 13 }}>not me</button>
-          <button onClick={handleClaim} disabled={!machineId} style={{ flex: 1, background: machineId ? "#1D9E75" : "var(--color-background-secondary)", border: "none", color: machineId ? "#fff" : "var(--color-text-tertiary)", borderRadius: "var(--border-radius-md)", padding: "8px", cursor: machineId ? "pointer" : "not-allowed", fontSize: 13, fontWeight: 500 }}>that's me</button>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={onDismiss} style={{ flex: 1, background: "var(--color-background-secondary)", border: "2px solid var(--color-border-secondary)", color: "var(--color-text-primary)", borderRadius: "var(--border-radius-md)", padding: "14px", cursor: "pointer", fontSize: 14, fontWeight: 500 }}>
+            Not me
+          </button>
+          <button onClick={handleClaim} disabled={!machineId} style={{ flex: 2, background: machineId ? "#1D9E75" : "var(--color-background-secondary)", border: "none", color: machineId ? "#fff" : "var(--color-text-tertiary)", borderRadius: "var(--border-radius-md)", padding: "14px", cursor: machineId ? "pointer" : "not-allowed", fontSize: 14, fontWeight: 500 }}>
+            That's me →
+          </button>
         </div>
+
       </div>
     </div>
   );
