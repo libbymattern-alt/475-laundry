@@ -107,124 +107,103 @@ function TimerRing({ progress, color, size = 80 }: any) {
   );
 }
 
-function ClaimModal({ activeSessions, onClaim, onDismiss }: any) {
+function ClaimTab({ sessions, now, onClaim }: any) {
   const [unit, setUnit] = useState(() => localStorage.getItem("laundry-unit") || UNITS[0]);
-  const [machineId, setMachineId] = useState(activeSessions[0]?.machineId || "");
+  const [selectedMachineId, setSelectedMachineId] = useState("");
+
+  const unclaimedSessions = Object.entries(sessions)
+    .filter(([, s]: any) => s?.source === "sensor" && s?.status === "running" && !s?.unit)
+    .map(([machineId, s]: any) => ({ machineId, ...s }));
 
   const handleClaim = () => {
     localStorage.setItem("laundry-unit", unit);
-    onClaim(machineId, unit);
+    onClaim(selectedMachineId, unit);
+    setSelectedMachineId("");
   };
 
+  if (unclaimedSessions.length === 0) {
+    return (
+      <div style={{ textAlign: "center" as const, padding: "48px 24px" }}>
+        <div style={{ fontSize: 32, marginBottom: 12 }}>🫧</div>
+        <div style={{ fontSize: 18, color: "var(--color-text-primary)", fontWeight: 500, marginBottom: 8 }}>
+          Nothing to claim
+        </div>
+        <div style={{ fontSize: 14, color: "var(--color-text-secondary)" }}>
+          When a machine starts and nobody has claimed it, it'll show up here.
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div style={{
-      position: "fixed" as const,
-      top: 0, left: 0, right: 0, bottom: 0,
-      background: "rgba(0,0,0,0.85)",
-      display: "flex", alignItems: "flex-end", justifyContent: "center",
-      zIndex: 9999,
-    }}>
-      <div style={{
-        position: "relative" as const,
-        zIndex: 10000,
-        background: "#d1f5e8",
-        borderRadius: "20px 20px 0 0",
-        padding: "28px 20px 48px",
-        width: "100%",
-        maxHeight: "85vh",
-        overflowY: "auto" as const,
-        boxShadow: "0 -4px 24px rgba(0,0,0,0.2)",
-      }}>
-        <div style={{ width: 40, height: 4, background: "#9FE1CB", borderRadius: 2, margin: "0 auto 24px" }} />
+    <div style={{ display: "flex", flexDirection: "column" as const, gap: 16 }}>
+      <div style={{ fontSize: 14, color: "var(--color-text-secondary)" }}>
+        Tap a machine to claim it as yours.
+      </div>
 
-        <div style={{ fontSize: 24, fontWeight: 600, color: "#085041", marginBottom: 4 }}>
-          Who's doing laundry?
-        </div>
-        <div style={{ fontSize: 14, color: "#0F6E56", marginBottom: 28 }}>
-          A machine just started nearby.
-        </div>
+      <div style={{ display: "flex", flexDirection: "column" as const, gap: 10 }}>
+        {unclaimedSessions.map((s: any) => {
+          const machine = ALL_MACHINES.find(m => m.id === s.machineId);
+          const isWasher = machine?.type === "washer";
+          const accent = isWasher ? "#1D9E75" : "#BA7517";
+          const accentLight = isWasher ? "#E1F5EE" : "#FAEEDA";
+          const accentBorder = isWasher ? "#9FE1CB" : "#FAC775";
+          const selected = selectedMachineId === s.machineId;
+          return (
+            <button key={s.machineId} onClick={() => setSelectedMachineId(selected ? "" : s.machineId)} style={{
+              background: selected ? accentLight : "var(--color-background-primary)",
+              border: `2px solid ${selected ? accent : accentBorder}`,
+              borderRadius: "var(--border-radius-lg)", padding: "16px 20px",
+              cursor: "pointer", display: "flex", alignItems: "center",
+              gap: 14, textAlign: "left" as const, width: "100%",
+            }}>
+              <div style={{ width: 48, height: 48, borderRadius: 12, background: selected ? accentBorder : accentLight, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0 }}>
+                {isWasher ? "🫧" : "🌀"}
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 16, fontWeight: 500, color: "var(--color-text-primary)" }}>{machine?.label}</div>
+                <div style={{ fontSize: 12, color: accent, marginTop: 2 }}>
+                  {s.cycleNum ? `cycle ${s.cycleNum} · ` : ""}{formatRunning(s.startTime, now)}
+                </div>
+              </div>
+              {selected && <span style={{ fontSize: 22, color: accent }}>✓</span>}
+            </button>
+          );
+        })}
+      </div>
 
-        {activeSessions.length > 1 && (
-          <>
-            <div style={{ fontSize: 11, fontWeight: 600, color: "#0F6E56", textTransform: "uppercase" as const, letterSpacing: 1.5, marginBottom: 10 }}>
-              Which machine?
-            </div>
-            <div style={{ display: "flex", flexDirection: "column" as const, gap: 8, marginBottom: 24 }}>
-              {activeSessions.map((s: any) => {
-                const machine = ALL_MACHINES.find(m => m.id === s.machineId);
-                const isWasher = machine?.type === "washer";
-                const selected = machineId === s.machineId;
-                return (
-                  <button key={s.machineId} onClick={() => setMachineId(s.machineId)} style={{
-                    background: selected ? "#1D9E75" : "#ffffff",
-                    border: `2px solid ${selected ? "#1D9E75" : "#9FE1CB"}`,
-                    borderRadius: 14, padding: "14px 16px",
-                    cursor: "pointer", display: "flex",
-                    alignItems: "center", gap: 12,
-                    textAlign: "left" as const, width: "100%",
-                  }}>
-                    <span style={{ fontSize: 26 }}>{isWasher ? "🫧" : "🌀"}</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 15, fontWeight: 600, color: selected ? "#ffffff" : "#085041" }}>
-                        {machine?.label}
-                      </div>
-                      {s.cycleNum && (
-                        <div style={{ fontSize: 12, color: selected ? "#9FE1CB" : "#0F6E56" }}>
-                          cycle {s.cycleNum}
-                        </div>
-                      )}
-                    </div>
-                    {selected && <span style={{ fontSize: 20, color: "#ffffff" }}>✓</span>}
-                  </button>
-                );
-              })}
-            </div>
-          </>
-        )}
-
-        <div style={{ fontSize: 11, fontWeight: 600, color: "#0F6E56", textTransform: "uppercase" as const, letterSpacing: 1.5, marginBottom: 12 }}>
-          Select your apt number
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 32 }}>
-          {UNITS.map(u => {
-            const selected = unit === u;
-            return (
-              <button key={u} onClick={() => setUnit(u)} style={{
-                background: selected ? "#1D9E75" : "#ffffff",
-                border: `2px solid ${selected ? "#1D9E75" : "#9FE1CB"}`,
-                borderRadius: 14, padding: "16px 8px",
-                cursor: "pointer", fontSize: 17,
-                fontWeight: selected ? 700 : 400,
-                color: selected ? "#ffffff" : "#085041",
-                textAlign: "center" as const,
-              }}>
-                {u}
-              </button>
-            );
-          })}
-        </div>
-
-        <div style={{ display: "flex", gap: 12 }}>
-          <button onClick={onDismiss} style={{
-            flex: 1, background: "#ffffff",
-            border: "2px solid #9FE1CB",
-            color: "#085041", borderRadius: 14, padding: "16px",
+      {selectedMachineId && (
+        <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "20px" }}>
+          <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 12 }}>
+            Your apt number
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 16 }}>
+            {UNITS.map(u => {
+              const selected = unit === u;
+              return (
+                <button key={u} onClick={() => setUnit(u)} style={{
+                  background: selected ? "#1D9E75" : "var(--color-background-secondary)",
+                  border: `1.5px solid ${selected ? "#1D9E75" : "var(--color-border-secondary)"}`,
+                  borderRadius: 10, padding: "12px 8px",
+                  cursor: "pointer", fontSize: 15,
+                  fontWeight: selected ? 600 : 400,
+                  color: selected ? "#fff" : "var(--color-text-primary)",
+                  textAlign: "center" as const,
+                }}>
+                  {u}
+                </button>
+              );
+            })}
+          </div>
+          <button onClick={handleClaim} style={{
+            width: "100%", background: "#1D9E75", border: "none",
+            color: "#fff", borderRadius: 12, padding: "14px",
             cursor: "pointer", fontSize: 15, fontWeight: 600,
-          }}>
-            Not me
-          </button>
-          <button onClick={handleClaim} disabled={!machineId} style={{
-            flex: 2, background: "#1D9E75",
-            border: "none", color: "#ffffff",
-            borderRadius: 14, padding: "16px",
-            cursor: machineId ? "pointer" : "not-allowed",
-            fontSize: 16, fontWeight: 700,
-            opacity: machineId ? 1 : 0.5,
           }}>
             That's me →
           </button>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -286,9 +265,6 @@ function MachineCard({ machine, session, onStart, onStop, now }: any) {
             <div style={{ color: accent, fontSize: 12, marginTop: 4 }}>
               {done ? (isWasher ? "↑ Move to dryer!" : "Grab your laundry!") : progress !== null ? session.cycleName : formatRunning(session.startTime, now)}
             </div>
-            {sensorDriven && !session.unit && !done && (
-              <button onClick={() => onStart(machine.id, null, null, true)} style={{ marginTop: 8, background: "transparent", border: `0.5px solid ${accent}`, color: accent, borderRadius: "var(--border-radius-md)", padding: "4px 10px", cursor: "pointer", fontSize: 11 }}>that's me</button>
-            )}
           </div>
           {!sensorDriven && (
             <button onClick={() => onStop(machine.id)} style={{ background: "transparent", border: "0.5px solid var(--color-border-danger)", color: "var(--color-text-danger)", borderRadius: "var(--border-radius-md)", padding: "6px 12px", cursor: "pointer", fontSize: 11 }}>Release</button>
@@ -356,8 +332,8 @@ function StatusBoard({ sessions, now }: any) {
                   {isInUse ? (
                     <>
                       <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginTop: 1 }}>
-                        {session.unit ? `Unit ${session.unit}` : ""}
-                        {session.cycleNum ? `${session.unit ? " · " : ""}cycle ${session.cycleNum}` : ""}
+                        {session.unit ? `Unit ${session.unit}` : "unclaimed"}
+                        {session.cycleNum ? ` · cycle ${session.cycleNum}` : ""}
                       </div>
                       <div style={{ fontSize: 12, color: accent, marginTop: 3, fontWeight: 500 }}>
                         {done ? "↑ Ready!" : remaining !== null ? formatTime(remaining) + " left" : formatRunning(session.startTime, now)}
@@ -393,7 +369,10 @@ function StatusBoard({ sessions, now }: any) {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: progress !== null ? 10 : 0 }}>
                   <div>
                     <span style={{ fontWeight: 500, fontSize: 14, color: "var(--color-text-primary)" }}>{machine?.label}</span>
-                    {session.unit && <span style={{ color: "var(--color-text-tertiary)", fontSize: 12, marginLeft: 8 }}>Unit {session.unit}</span>}
+                    {session.unit
+                      ? <span style={{ color: "var(--color-text-tertiary)", fontSize: 12, marginLeft: 8 }}>Unit {session.unit}</span>
+                      : <span style={{ color: "var(--color-text-tertiary)", fontSize: 12, marginLeft: 8 }}>unclaimed</span>
+                    }
                     {session.cycleNum && <span style={{ color: "var(--color-text-tertiary)", fontSize: 12, marginLeft: 4 }}>· #{session.cycleNum}</span>}
                   </div>
                   <div style={{ fontSize: 13, color: accent, fontWeight: 500 }}>
@@ -430,19 +409,11 @@ export default function LaundryApp() {
   const [notified, setNotified] = useState<any>({});
   const [activeTab, setActiveTab] = useState("status");
   const [connected, setConnected] = useState(false);
-  const [claimPrompt, setClaimPrompt] = useState(false);
 
   useEffect(() => {
     const sessionsRef = ref(db, "sessions");
     const unsub = onValue(sessionsRef, (snapshot) => {
-      const data = snapshot.val() || {};
-      setSessions((prev: any) => {
-        const hasNewSensor = Object.entries(data).some(([machineId, session]: any) =>
-          session?.source === "sensor" && session?.status === "running" && !prev[machineId]
-        );
-        if (hasNewSensor) setClaimPrompt(true);
-        return data;
-      });
+      setSessions(snapshot.val() || {});
       setConnected(true);
     });
     return () => unsub();
@@ -479,8 +450,7 @@ export default function LaundryApp() {
     });
   }, [now, sessions, notified]);
 
-  const handleStart = useCallback(async (machineId: string, unit: string | null, cycle: any, claimSensor = false) => {
-    if (claimSensor) { setClaimPrompt(true); return; }
+  const handleStart = useCallback(async (machineId: string, unit: string | null, cycle: any) => {
     const cycleNum = await getNextCycleNumber();
     set(ref(db, `sessions/${machineId}`), {
       unit, cycleName: cycle.label,
@@ -499,14 +469,19 @@ export default function LaundryApp() {
 
   const handleClaim = useCallback((machineId: string, unit: string) => {
     set(ref(db, `sessions/${machineId}/unit`), unit);
-    setClaimPrompt(false);
   }, []);
 
   const inUseCount = Object.keys(sessions).length;
   const freeCount = 4 - inUseCount;
-  const activeSensorSessions = Object.entries(sessions)
-    .filter(([, s]: any) => s?.source === "sensor" && s?.status === "running")
-    .map(([machineId, s]: any) => ({ machineId, ...s }));
+  const unclaimedCount = Object.values(sessions).filter((s: any) =>
+    s?.source === "sensor" && s?.status === "running" && !s?.unit
+  ).length;
+
+  const tabs = [
+    { id: "status", label: "Status" },
+    { id: "claim", label: unclaimedCount > 0 ? `Claim (${unclaimedCount})` : "Claim" },
+    { id: "start", label: "Start" },
+  ];
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--color-background-tertiary)", color: "var(--color-text-primary)" }}>
@@ -535,8 +510,15 @@ export default function LaundryApp() {
       </div>
 
       <div style={{ display: "flex", borderBottom: "0.5px solid var(--color-border-tertiary)", padding: "0 24px", background: "var(--color-background-primary)" }}>
-        {[{ id: "status", label: "Status board" }, { id: "start", label: "Start machine" }].map(tab => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{ background: "none", border: "none", cursor: "pointer", padding: "14px 0", marginRight: 28, fontSize: 12, color: activeTab === tab.id ? "var(--color-text-primary)" : "var(--color-text-tertiary)", borderBottom: `2px solid ${activeTab === tab.id ? "#1D9E75" : "transparent"}`, letterSpacing: 1, textTransform: "uppercase" as const }}>
+        {tabs.map(tab => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
+            background: "none", border: "none", cursor: "pointer",
+            padding: "14px 0", marginRight: 24, fontSize: 12,
+            color: activeTab === tab.id ? "var(--color-text-primary)" : "var(--color-text-tertiary)",
+            borderBottom: `2px solid ${activeTab === tab.id ? "#1D9E75" : "transparent"}`,
+            letterSpacing: 1, textTransform: "uppercase" as const,
+            fontWeight: tab.id === "claim" && unclaimedCount > 0 ? 600 : 400,
+          }}>
             {tab.label}
           </button>
         ))}
@@ -544,6 +526,7 @@ export default function LaundryApp() {
 
       <div style={{ padding: "20px" }}>
         {activeTab === "status" && <StatusBoard sessions={sessions} now={now} />}
+        {activeTab === "claim" && <ClaimTab sessions={sessions} now={now} onClaim={handleClaim} />}
         {activeTab === "start" && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 16 }}>
             <div style={{ gridColumn: "1/-1", fontSize: 13, fontWeight: 500, color: "var(--color-text-secondary)" }}>Washers</div>
@@ -553,14 +536,6 @@ export default function LaundryApp() {
           </div>
         )}
       </div>
-
-      {claimPrompt && activeSensorSessions.length > 0 && (
-        <ClaimModal
-          activeSessions={activeSensorSessions}
-          onClaim={(machineId: string, unit: string) => handleClaim(machineId, unit)}
-          onDismiss={() => setClaimPrompt(false)}
-        />
-      )}
 
       {notifications.slice(-1).map((n: any) => (
         <Notification key={n.id} note={n.msg} onDismiss={() => setNotifications((prev: any) => prev.filter((x: any) => x.id !== n.id))} />
