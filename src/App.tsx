@@ -1,3 +1,112 @@
+import { useState, useEffect, useCallback } from "react";
+import { initializeApp } from "firebase/app";
+import { getDatabase, ref, onValue, set, remove, runTransaction } from "firebase/database";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAX8f3ITqqM-ubR41aALbWyuHzKO0hWqv0",
+  authDomain: "laundry-fd0a4.firebaseapp.com",
+  databaseURL: "https://laundry-fd0a4-default-rtdb.firebaseio.com",
+  projectId: "laundry-fd0a4",
+  storageBucket: "laundry-fd0a4.firebasestorage.app",
+  messagingSenderId: "859520322947",
+  appId: "1:859520322947:web:7a835161605325122cfab6",
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getDatabase(firebaseApp);
+
+const MACHINES = {
+  washers: [
+    { id: "w1", label: "Washer 1", type: "washer" },
+    { id: "w2", label: "Washer 2", type: "washer" },
+  ],
+  dryers: [
+    { id: "d1", label: "Dryer 1", type: "dryer" },
+    { id: "d2", label: "Dryer 2", type: "dryer" },
+  ],
+};
+
+const ALL_MACHINES = [...MACHINES.washers, ...MACHINES.dryers];
+
+const WASH_CYCLES = [
+  { label: "Quick Wash", minutes: 30 },
+  { label: "Normal", minutes: 55 },
+  { label: "Heavy Duty", minutes: 60 },
+  { label: "Delicates", minutes: 35 },
+  { label: "Bulky Items", minutes: 70 },
+];
+
+const DRY_CYCLES = [
+  { label: "Quick Dry", minutes: 30 },
+  { label: "Normal", minutes: 55 },
+  { label: "Heavy Duty", minutes: 70 },
+  { label: "Low Heat", minutes: 60 },
+];
+
+const UNITS = ["1R","1L","1RR","2R","2L","3R","3L","4R","4L"];
+
+async function getNextCycleNumber(): Promise<number> {
+  const today = new Date().toISOString().slice(0, 10);
+  const counterRef = ref(db, `cycleCounter/${today}`);
+  let cycleNum = 1;
+  await runTransaction(counterRef, (current) => {
+    cycleNum = (current || 0) + 1;
+    return cycleNum;
+  });
+  return cycleNum;
+}
+
+function formatTime(ms: number) {
+  if (ms <= 0) return "Done!";
+  const totalSec = Math.floor(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function formatRunning(startTime: any, now: number) {
+  const st = Number(startTime);
+  if (!st || isNaN(st) || st < 1000000000000) return "running";
+  const mins = Math.floor((now - st) / 60000);
+  if (mins < 1) return "just started";
+  return `running ${mins} min`;
+}
+
+function getRemaining(session: any, now: number) {
+  if (!session?.durationMs || !session?.startTime) return null;
+  const st = Number(session.startTime);
+  if (!st || isNaN(st) || st < 1000000000000) return null;
+  return Math.max(0, session.durationMs - (now - st));
+}
+
+function getProgress(session: any, now: number) {
+  if (!session?.durationMs || !session?.startTime) return null;
+  const st = Number(session.startTime);
+  if (!st || isNaN(st) || st < 1000000000000) return null;
+  return Math.min(1, (now - st) / session.durationMs);
+}
+
+function isDone(session: any, now: number) {
+  if (!session) return false;
+  if (session.status === "ready") return true;
+  const remaining = getRemaining(session, now);
+  return remaining !== null && remaining <= 0;
+}
+
+function TimerRing({ progress, color, size = 80 }: any) {
+  const r = (size - 12) / 2;
+  const circ = 2 * Math.PI * r;
+  const offset = circ * (1 - Math.max(0, Math.min(1, progress)));
+  return (
+    <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="var(--color-background-secondary)" strokeWidth="6" />
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth="6"
+        strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round"
+        style={{ transition: "stroke-dashoffset 1s linear" }} />
+    </svg>
+  );
+}
+
 function ClaimModal({ activeSessions, onClaim, onDismiss }: any) {
   const [unit, setUnit] = useState(() => localStorage.getItem("laundry-unit") || UNITS[0]);
   const [machineId, setMachineId] = useState(activeSessions[0]?.machineId || "");
@@ -9,12 +118,11 @@ function ClaimModal({ activeSessions, onClaim, onDismiss }: any) {
 
   return (
     <div style={{
-  position: "fixed" as const,
-  top: 0, left: 0, right: 0, bottom: 0,
-  background: "rgba(0,0,0,0.85)",
-  display: "flex", alignItems: "flex-end", justifyContent: "center",
-  zIndex: 9999,
-  WebkitOverflowScrolling: "touch" as const,
+      position: "fixed" as const,
+      top: 0, left: 0, right: 0, bottom: 0,
+      background: "rgba(0,0,0,0.85)",
+      display: "flex", alignItems: "flex-end", justifyContent: "center",
+      zIndex: 9999,
     }}>
       <div style={{
         position: "relative" as const,
@@ -25,9 +133,8 @@ function ClaimModal({ activeSessions, onClaim, onDismiss }: any) {
         width: "100%",
         maxHeight: "85vh",
         overflowY: "auto" as const,
-        boxShadow: "0 -4px 24px rgba(0,0,0,0.15)",
+        boxShadow: "0 -4px 24px rgba(0,0,0,0.2)",
       }}>
-
         <div style={{ width: 40, height: 4, background: "#9FE1CB", borderRadius: 2, margin: "0 auto 24px" }} />
 
         <div style={{ fontSize: 24, fontWeight: 600, color: "#085041", marginBottom: 4 }}>
@@ -67,62 +174,4 @@ function ClaimModal({ activeSessions, onClaim, onDismiss }: any) {
                         </div>
                       )}
                     </div>
-                    {selected && <span style={{ fontSize: 20, color: "#ffffff" }}>✓</span>}
-                  </button>
-                );
-              })}
-            </div>
-          </>
-        )}
-
-        <div style={{ fontSize: 11, fontWeight: 600, color: "#0F6E56", textTransform: "uppercase" as const, letterSpacing: 1.5, marginBottom: 12 }}>
-          Select your apt number
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 32 }}>
-          {UNITS.map(u => {
-            const selected = unit === u;
-            return (
-              <button key={u} onClick={() => setUnit(u)} style={{
-                background: selected ? "#1D9E75" : "#ffffff",
-                border: `2px solid ${selected ? "#1D9E75" : "#9FE1CB"}`,
-                borderRadius: 14, padding: "16px 8px",
-                cursor: "pointer", fontSize: 17,
-                fontWeight: selected ? 700 : 400,
-                color: selected ? "#ffffff" : "#085041",
-                textAlign: "center" as const,
-              }}>
-                {u}
-              </button>
-            );
-          })}
-        </div>
-
-        <div style={{ display: "flex", gap: 12 }}>
-          <button onClick={onDismiss} style={{
-            flex: 1,
-            background: "#ffffff",
-            border: "2px solid #9FE1CB",
-            color: "#085041",
-            borderRadius: 14, padding: "16px",
-            cursor: "pointer", fontSize: 15, fontWeight: 600,
-          }}>
-            Not me
-          </button>
-          <button onClick={handleClaim} disabled={!machineId} style={{
-            flex: 2,
-            background: "#1D9E75",
-            border: "none",
-            color: "#ffffff",
-            borderRadius: 14, padding: "16px",
-            cursor: machineId ? "pointer" : "not-allowed",
-            fontSize: 16, fontWeight: 700,
-            opacity: machineId ? 1 : 0.5,
-          }}>
-            That's me →
-          </button>
-        </div>
-
-      </div>
-    </div>
-  );
-}
+                    {
