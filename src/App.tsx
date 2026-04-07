@@ -15,8 +15,6 @@ function ClaimModal({ activeSessions, onClaim, onDismiss }: any) {
   display: "flex", alignItems: "flex-end", justifyContent: "center",
   zIndex: 9999,
   WebkitOverflowScrolling: "touch" as const,
-}}>
-
     }}>
       <div style={{
         position: "relative" as const,
