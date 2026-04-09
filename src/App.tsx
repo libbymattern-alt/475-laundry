@@ -78,6 +78,14 @@ function isDone(session: any, now: number) {
   return remaining !== null && remaining <= 0;
 }
 
+function isExpired(session: any, now: number) {
+  if (!session || session.status !== "ready") return false;
+  const st = Number(session.startTime);
+  if (!st || isNaN(st) || st < 1000000000000) return false;
+  const readyAt = session.durationMs ? st + session.durationMs : st;
+  return now - readyAt > 45 * 60 * 1000;
+}
+
 function HowItWorks() {
   const steps = [
     { icon: "📡", title: "Fully automatic", body: "Each machine has a small sensor on it that detects when it's running. You don't need to press anything or sign in." },
@@ -122,7 +130,7 @@ function ClaimTab({ sessions, now, onClaim }: any) {
   const [selectedMachineId, setSelectedMachineId] = useState("");
 
   const unclaimedSessions = Object.entries(sessions)
-    .filter(([, s]: any) => s?.source === "sensor" && s?.status === "running" && !s?.unit)
+    .filter(([, s]: any) => s?.source === "sensor" && s?.status === "running" && !s?.unit && !isExpired(s, now))
     .map(([machineId, s]: any) => ({ machineId, ...s }));
 
   const handleClaim = () => {
@@ -246,7 +254,8 @@ function StatusBoard({ sessions, now }: any) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           {ALL_MACHINES.map((m: any) => {
             const session = sessions[m.id];
-            const isInUse = !!session;
+            const expired = isExpired(session, now);
+            const isInUse = !!session && !expired;
             const done = isDone(session, now);
             const remaining = getRemaining(session, now);
             const isWasher = m.type === "washer";
@@ -278,55 +287,57 @@ function StatusBoard({ sessions, now }: any) {
         </div>
       </div>
 
-      {Object.keys(sessions).length === 0 && (
+      {Object.keys(sessions).filter(id => !isExpired(sessions[id], now)).length === 0 && (
         <div style={{ textAlign: "center" as const, padding: "48px 24px", color: "var(--color-text-tertiary)", fontSize: 18 }}>
           All machines are free ✦
         </div>
       )}
 
-      {Object.keys(sessions).length > 0 && (
+      {Object.keys(sessions).filter(id => !isExpired(sessions[id], now)).length > 0 && (
         <div>
           <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", letterSpacing: 2, textTransform: "uppercase" as const, marginBottom: 12 }}>Active sessions</div>
-          {Object.entries(sessions).map(([machineId, session]: any) => {
-            const machine = ALL_MACHINES.find(m => m.id === machineId);
-            const done = isDone(session, now);
-            const remaining = getRemaining(session, now);
-            const progress = getProgress(session, now);
-            const isWasher = machine?.type === "washer";
-            const accent = isWasher ? "#1D9E75" : "#BA7517";
-            const accentBorder = isWasher ? "#9FE1CB" : "#FAC775";
-            return (
-              <div key={machineId} style={{ background: "var(--color-background-primary)", border: `0.5px solid ${done ? accentBorder : "var(--color-border-tertiary)"}`, borderRadius: "var(--border-radius-md)", padding: "14px 16px", marginBottom: 8 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: progress !== null ? 10 : 0 }}>
-                  <div>
-                    <span style={{ fontWeight: 500, fontSize: 14, color: "var(--color-text-primary)" }}>{machine?.label}</span>
-                    {session.unit
-                      ? <span style={{ color: "var(--color-text-tertiary)", fontSize: 12, marginLeft: 8 }}>Unit {session.unit}</span>
-                      : <span style={{ color: "var(--color-text-tertiary)", fontSize: 12, marginLeft: 8 }}>unclaimed</span>
-                    }
-                    {session.cycleNum && <span style={{ color: "var(--color-text-tertiary)", fontSize: 12, marginLeft: 4 }}>· #{session.cycleNum}</span>}
+          {Object.entries(sessions)
+            .filter(([, session]: any) => !isExpired(session, now))
+            .map(([machineId, session]: any) => {
+              const machine = ALL_MACHINES.find(m => m.id === machineId);
+              const done = isDone(session, now);
+              const remaining = getRemaining(session, now);
+              const progress = getProgress(session, now);
+              const isWasher = machine?.type === "washer";
+              const accent = isWasher ? "#1D9E75" : "#BA7517";
+              const accentBorder = isWasher ? "#9FE1CB" : "#FAC775";
+              return (
+                <div key={machineId} style={{ background: "var(--color-background-primary)", border: `0.5px solid ${done ? accentBorder : "var(--color-border-tertiary)"}`, borderRadius: "var(--border-radius-md)", padding: "14px 16px", marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: progress !== null ? 10 : 0 }}>
+                    <div>
+                      <span style={{ fontWeight: 500, fontSize: 14, color: "var(--color-text-primary)" }}>{machine?.label}</span>
+                      {session.unit
+                        ? <span style={{ color: "var(--color-text-tertiary)", fontSize: 12, marginLeft: 8 }}>Unit {session.unit}</span>
+                        : <span style={{ color: "var(--color-text-tertiary)", fontSize: 12, marginLeft: 8 }}>unclaimed</span>
+                      }
+                      {session.cycleNum && <span style={{ color: "var(--color-text-tertiary)", fontSize: 12, marginLeft: 4 }}>· #{session.cycleNum}</span>}
+                    </div>
+                    <div style={{ fontSize: 13, color: accent, fontWeight: 500 }}>
+                      {done ? "Done!" : remaining !== null ? formatTime(remaining) : formatRunning(session.startTime, now)}
+                    </div>
                   </div>
-                  <div style={{ fontSize: 13, color: accent, fontWeight: 500 }}>
-                    {done ? "Done!" : remaining !== null ? formatTime(remaining) : formatRunning(session.startTime, now)}
-                  </div>
+                  {progress !== null && (
+                    <>
+                      <div style={{ height: 3, background: "var(--color-background-secondary)", borderRadius: 2, overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${progress * 100}%`, background: accent, transition: "width 1s linear" }} />
+                      </div>
+                      <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", marginTop: 6, display: "flex", justifyContent: "space-between" }}>
+                        <span>{session.cycleName}</span>
+                        <span>{Math.round(progress * 100)}% complete</span>
+                      </div>
+                    </>
+                  )}
+                  {progress === null && (
+                    <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginTop: 6 }}>sensor detected · auto</div>
+                  )}
                 </div>
-                {progress !== null && (
-                  <>
-                    <div style={{ height: 3, background: "var(--color-background-secondary)", borderRadius: 2, overflow: "hidden" }}>
-                      <div style={{ height: "100%", width: `${progress * 100}%`, background: accent, transition: "width 1s linear" }} />
-                    </div>
-                    <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", marginTop: 6, display: "flex", justifyContent: "space-between" }}>
-                      <span>{session.cycleName}</span>
-                      <span>{Math.round(progress * 100)}% complete</span>
-                    </div>
-                  </>
-                )}
-                {progress === null && (
-                  <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginTop: 6 }}>sensor detected · auto</div>
-                )}
-              </div>
-            );
-          })}
+              );
+            })}
         </div>
       )}
     </div>
@@ -361,7 +372,7 @@ export default function LaundryApp() {
 
   useEffect(() => {
     Object.entries(sessions).forEach(([machineId, session]: any) => {
-      if (!session) return;
+      if (!session || isExpired(session, now)) return;
       const done = isDone(session, now);
       if (done && !notified[machineId]) {
         setNotified((prev: any) => ({ ...prev, [machineId]: true }));
@@ -385,11 +396,13 @@ export default function LaundryApp() {
     set(ref(db, `sessions/${machineId}/unit`), unit);
   }, []);
 
-  const inUseCount = Object.keys(sessions).length;
+  const activeSessions = Object.keys(sessions).filter(id => !isExpired(sessions[id], now));
+  const inUseCount = activeSessions.length;
   const freeCount = 4 - inUseCount;
-  const unclaimedCount = Object.values(sessions).filter((s: any) =>
-    s?.source === "sensor" && s?.status === "running" && !s?.unit
-  ).length;
+  const unclaimedCount = activeSessions.filter(id => {
+    const s = sessions[id];
+    return s?.source === "sensor" && s?.status === "running" && !s?.unit;
+  }).length;
 
   const tabs = [
     { id: "status", label: "Status" },
