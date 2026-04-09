@@ -28,21 +28,6 @@ const MACHINES = {
 
 const ALL_MACHINES = [...MACHINES.washers, ...MACHINES.dryers];
 
-const WASH_CYCLES = [
-  { label: "Quick Wash", minutes: 30 },
-  { label: "Normal", minutes: 55 },
-  { label: "Heavy Duty", minutes: 60 },
-  { label: "Delicates", minutes: 35 },
-  { label: "Bulky Items", minutes: 70 },
-];
-
-const DRY_CYCLES = [
-  { label: "Quick Dry", minutes: 30 },
-  { label: "Normal", minutes: 55 },
-  { label: "Heavy Duty", minutes: 70 },
-  { label: "Low Heat", minutes: 60 },
-];
-
 const UNITS = ["1R","1L","1RR","2R","2L","3R","3L","4R","4L"];
 
 async function getNextCycleNumber(): Promise<number> {
@@ -93,17 +78,42 @@ function isDone(session: any, now: number) {
   return remaining !== null && remaining <= 0;
 }
 
-function TimerRing({ progress, color, size = 80 }: any) {
-  const r = (size - 12) / 2;
-  const circ = 2 * Math.PI * r;
-  const offset = circ * (1 - Math.max(0, Math.min(1, progress)));
+function HowItWorks() {
+  const steps = [
+    { icon: "📡", title: "Fully automatic", body: "Each machine has a small sensor on it that detects when it's running. You don't need to press anything or sign in." },
+    { icon: "🔄", title: "Running", body: "When a machine starts, the app updates automatically within seconds." },
+    { icon: "🧺", title: "Ready to grab", body: "When a cycle finishes and the machine stops vibrating, it flips to \"Ready to grab\" after a few minutes." },
+    { icon: "🅿️", title: "Optional: claim your load", body: "Tap the Claim tab when you start your laundry to attach your apartment number. This helps neighbors know whose clothes are in the machine." },
+    { icon: "📱", title: "Add to your home screen", body: "On iPhone: tap the share button (□↑) then \"Add to Home Screen\". On Android: tap the menu then \"Add to Home Screen\". It'll work like an app!" },
+  ];
+
   return (
-    <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
-      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="var(--color-background-secondary)" strokeWidth="6" />
-      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth="6"
-        strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round"
-        style={{ transition: "stroke-dashoffset 1s linear" }} />
-    </svg>
+    <div style={{ display: "flex", flexDirection: "column" as const, gap: 12 }}>
+      <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "20px" }}>
+        <div style={{ fontSize: 22, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 6 }}>
+          No sign-in. No buttons.
+        </div>
+        <div style={{ fontSize: 14, color: "var(--color-text-secondary)", lineHeight: 1.6 }}>
+          The laundry room runs itself. Just check the Status tab to see what's available.
+        </div>
+      </div>
+
+      {steps.map((step, i) => (
+        <div key={i} style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "16px 20px", display: "flex", gap: 16, alignItems: "flex-start" }}>
+          <div style={{ fontSize: 28, flexShrink: 0, marginTop: 2 }}>{step.icon}</div>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 4 }}>{step.title}</div>
+            <div style={{ fontSize: 13, color: "var(--color-text-secondary)", lineHeight: 1.6 }}>{step.body}</div>
+          </div>
+        </div>
+      ))}
+
+      <div style={{ background: "#E1F5EE", border: "0.5px solid #9FE1CB", borderRadius: "var(--border-radius-lg)", padding: "16px 20px" }}>
+        <div style={{ fontSize: 13, color: "#085041", lineHeight: 1.6 }}>
+          <strong>Questions?</strong> Knock on 1RR or text the building group chat.
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -125,9 +135,7 @@ function ClaimTab({ sessions, now, onClaim }: any) {
     return (
       <div style={{ textAlign: "center" as const, padding: "48px 24px" }}>
         <div style={{ fontSize: 32, marginBottom: 12 }}>🫧</div>
-        <div style={{ fontSize: 18, color: "var(--color-text-primary)", fontWeight: 500, marginBottom: 8 }}>
-          Nothing to claim
-        </div>
+        <div style={{ fontSize: 18, color: "var(--color-text-primary)", fontWeight: 500, marginBottom: 8 }}>Nothing to claim</div>
         <div style={{ fontSize: 14, color: "var(--color-text-secondary)" }}>
           When a machine starts and nobody has claimed it, it'll show up here.
         </div>
@@ -140,7 +148,6 @@ function ClaimTab({ sessions, now, onClaim }: any) {
       <div style={{ fontSize: 14, color: "var(--color-text-secondary)" }}>
         Tap a machine to claim it as yours.
       </div>
-
       <div style={{ display: "flex", flexDirection: "column" as const, gap: 10 }}>
         {unclaimedSessions.map((s: any) => {
           const machine = ALL_MACHINES.find(m => m.id === s.machineId);
@@ -208,93 +215,17 @@ function ClaimTab({ sessions, now, onClaim }: any) {
   );
 }
 
-function MachineCard({ machine, session, onStart, onStop, now }: any) {
-  const sensorDriven = session?.source === "sensor";
-  const isInUse = !!session;
-  const done = isDone(session, now);
-  const remaining = getRemaining(session, now);
-  const progress = getProgress(session, now);
-  const isWasher = machine.type === "washer";
-  const accent = isWasher ? "#1D9E75" : "#BA7517";
-  const accentLight = isWasher ? "#E1F5EE" : "#FAEEDA";
-  const accentBorder = isWasher ? "#9FE1CB" : "#FAC775";
-  const cycles = isWasher ? WASH_CYCLES : DRY_CYCLES;
-  const [unit, setUnit] = useState(() => localStorage.getItem("laundry-unit") || UNITS[0]);
-  const [cycle, setCycle] = useState(cycles[1]);
-  const [customMinutes, setCustomMinutes] = useState("");
-  const [useCustom, setUseCustom] = useState(false);
-  const effectiveCycle = useCustom && customMinutes ? { label: `Custom (${customMinutes}m)`, minutes: parseInt(customMinutes) } : cycle;
-
+function TimerRing({ progress, color, size = 80 }: any) {
+  const r = (size - 12) / 2;
+  const circ = 2 * Math.PI * r;
+  const offset = circ * (1 - Math.max(0, Math.min(1, progress)));
   return (
-    <div style={{
-      background: isInUse ? accentLight : "var(--color-background-primary)",
-      border: `0.5px solid ${isInUse ? accentBorder : "var(--color-border-tertiary)"}`,
-      borderRadius: "var(--border-radius-lg)", padding: "20px",
-      display: "flex", flexDirection: "column" as const, gap: 12,
-      transition: "all 0.3s ease",
-    }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div>
-          <div style={{ fontSize: 11, color: isInUse ? accent : "var(--color-text-tertiary)", letterSpacing: 2, textTransform: "uppercase" as const }}>{machine.type}</div>
-          <div style={{ fontSize: 20, fontWeight: 500, color: "var(--color-text-primary)", marginTop: 2 }}>{machine.label}</div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {session?.cycleNum && <div style={{ fontSize: 14, color: accent, fontWeight: 500 }}>#{session.cycleNum}</div>}
-          <div style={{ background: isInUse ? accentBorder : "var(--color-background-secondary)", color: isInUse ? accent : "var(--color-text-tertiary)", borderRadius: 20, padding: "4px 12px", fontSize: 11, letterSpacing: 1, textTransform: "uppercase" as const }}>
-            {done ? "Done" : isInUse ? (sensorDriven ? "Running" : "In Use") : "Free"}
-          </div>
-        </div>
-      </div>
-
-      {isInUse && (
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          {progress !== null ? (
-            <div style={{ position: "relative" as const, flexShrink: 0 }}>
-              <TimerRing progress={progress} color={accent} size={72} />
-              <div style={{ position: "absolute" as const, inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: accent }}>
-                {done ? "✓" : formatTime(remaining!)}
-              </div>
-            </div>
-          ) : (
-            <div style={{ width: 72, height: 72, borderRadius: "50%", background: accentBorder, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 28 }}>
-              {isWasher ? "🫧" : "🌀"}
-            </div>
-          )}
-          <div style={{ flex: 1 }}>
-            {session.unit && <><div style={{ color: "var(--color-text-secondary)", fontSize: 12 }}>Unit</div><div style={{ color: "var(--color-text-primary)", fontSize: 15, fontWeight: 500 }}>{session.unit}</div></>}
-            <div style={{ color: accent, fontSize: 12, marginTop: 4 }}>
-              {done ? (isWasher ? "↑ Move to dryer!" : "Grab your laundry!") : progress !== null ? session.cycleName : formatRunning(session.startTime, now)}
-            </div>
-          </div>
-          {!sensorDriven && (
-            <button onClick={() => onStop(machine.id)} style={{ background: "transparent", border: "0.5px solid var(--color-border-danger)", color: "var(--color-text-danger)", borderRadius: "var(--border-radius-md)", padding: "6px 12px", cursor: "pointer", fontSize: 11 }}>Release</button>
-          )}
-        </div>
-      )}
-
-      {!isInUse && (
-        <div style={{ display: "flex", flexDirection: "column" as const, gap: 10 }}>
-          <div style={{ display: "flex", gap: 8 }}>
-            <select value={unit} onChange={e => { setUnit(e.target.value); localStorage.setItem("laundry-unit", e.target.value); }} style={{ flex: 1, background: "var(--color-background-secondary)", border: "0.5px solid var(--color-border-tertiary)", color: "var(--color-text-primary)", borderRadius: "var(--border-radius-md)", padding: "8px 10px", fontSize: 12 }}>
-              {UNITS.map(u => <option key={u} value={u}>Unit {u}</option>)}
-            </select>
-            <select value={useCustom ? "custom" : cycle.label} onChange={e => { if (e.target.value === "custom") setUseCustom(true); else { setUseCustom(false); setCycle(cycles.find((c: any) => c.label === e.target.value) || cycles[1]); }}} style={{ flex: 2, background: "var(--color-background-secondary)", border: "0.5px solid var(--color-border-tertiary)", color: "var(--color-text-primary)", borderRadius: "var(--border-radius-md)", padding: "8px 10px", fontSize: 12 }}>
-              {cycles.map((c: any) => <option key={c.label} value={c.label}>{c.label} ({c.minutes}m)</option>)}
-              <option value="custom">Custom time...</option>
-            </select>
-          </div>
-          {useCustom && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <input type="number" min="1" max="240" placeholder="Enter minutes" value={customMinutes} onChange={e => setCustomMinutes(e.target.value)} style={{ flex: 1, background: "var(--color-background-secondary)", border: `0.5px solid ${accent}`, color: "var(--color-text-primary)", borderRadius: "var(--border-radius-md)", padding: "8px 10px", fontSize: 12, outline: "none" }} />
-              <div style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>min</div>
-            </div>
-          )}
-          <button onClick={() => onStart(machine.id, unit, effectiveCycle)} disabled={useCustom && !customMinutes} style={{ background: (useCustom && !customMinutes) ? "var(--color-background-secondary)" : accent, color: (useCustom && !customMinutes) ? "var(--color-text-tertiary)" : "#fff", border: "none", borderRadius: "var(--border-radius-md)", padding: "10px", cursor: (useCustom && !customMinutes) ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 500, textTransform: "uppercase" as const, letterSpacing: 1 }}>
-            Start {machine.type}
-          </button>
-        </div>
-      )}
-    </div>
+    <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="var(--color-background-secondary)" strokeWidth="6" />
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth="6"
+        strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round"
+        style={{ transition: "stroke-dashoffset 1s linear" }} />
+    </svg>
   );
 }
 
@@ -450,23 +381,6 @@ export default function LaundryApp() {
     });
   }, [now, sessions, notified]);
 
-  const handleStart = useCallback(async (machineId: string, unit: string | null, cycle: any) => {
-    const cycleNum = await getNextCycleNumber();
-    set(ref(db, `sessions/${machineId}`), {
-      unit, cycleName: cycle.label,
-      durationMs: cycle.minutes * 60 * 1000,
-      startTime: Date.now(),
-      cycleNum, source: "manual",
-    });
-    setNotified((prev: any) => ({ ...prev, [machineId]: false }));
-    if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
-  }, []);
-
-  const handleStop = useCallback((machineId: string) => {
-    remove(ref(db, `sessions/${machineId}`));
-    setNotified((prev: any) => ({ ...prev, [machineId]: false }));
-  }, []);
-
   const handleClaim = useCallback((machineId: string, unit: string) => {
     set(ref(db, `sessions/${machineId}/unit`), unit);
   }, []);
@@ -480,7 +394,7 @@ export default function LaundryApp() {
   const tabs = [
     { id: "status", label: "Status" },
     { id: "claim", label: unclaimedCount > 0 ? `Claim (${unclaimedCount})` : "Claim" },
-    { id: "start", label: "Start" },
+    { id: "howto", label: "How it works" },
   ];
 
   return (
@@ -527,14 +441,7 @@ export default function LaundryApp() {
       <div style={{ padding: "20px" }}>
         {activeTab === "status" && <StatusBoard sessions={sessions} now={now} />}
         {activeTab === "claim" && <ClaimTab sessions={sessions} now={now} onClaim={handleClaim} />}
-        {activeTab === "start" && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 16 }}>
-            <div style={{ gridColumn: "1/-1", fontSize: 13, fontWeight: 500, color: "var(--color-text-secondary)" }}>Washers</div>
-            {MACHINES.washers.map(m => <MachineCard key={m.id} machine={m} session={sessions[m.id]} onStart={handleStart} onStop={handleStop} now={now} />)}
-            <div style={{ gridColumn: "1/-1", fontSize: 13, fontWeight: 500, color: "var(--color-text-secondary)", marginTop: 8 }}>Dryers</div>
-            {MACHINES.dryers.map(m => <MachineCard key={m.id} machine={m} session={sessions[m.id]} onStart={handleStart} onStop={handleStop} now={now} />)}
-          </div>
-        )}
+        {activeTab === "howto" && <HowItWorks />}
       </div>
 
       {notifications.slice(-1).map((n: any) => (
