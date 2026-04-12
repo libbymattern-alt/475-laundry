@@ -529,7 +529,7 @@ export default function LaundryApp() {
   const tabs = [
     { id: "status", label: "Status" },
     { id: "claim", label: unclaimedCount > 0 ? `Claim (${unclaimedCount})` : "Claim" },
-    { id: "board", label: "Board" },
+    { id: "board", label: "Messages" },
     { id: "howto", label: "How it works" },
   ];
 
