@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { initializeApp } from "firebase/app";
-import { getDatabase, ref, onValue, set, remove, runTransaction } from "firebase/database";
+import { getDatabase, ref, onValue, set, remove, runTransaction, push } from "firebase/database";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAX8f3ITqqM-ubR41aALbWyuHzKO0hWqv0",
@@ -57,6 +57,15 @@ function formatRunning(startTime: any, now: number) {
   return `running ${mins} min`;
 }
 
+function formatAgo(ts: number) {
+  const mins = Math.floor((Date.now() - ts) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
 function getRemaining(session: any, now: number) {
   if (!session?.durationMs || !session?.startTime) return null;
   const st = Number(session.startTime);
@@ -90,6 +99,112 @@ function isSensorDown(machineId: string, heartbeats: any, now: number) {
   const hb = heartbeats?.[machineId];
   if (!hb?.ts) return false;
   return now - Number(hb.ts) > HEARTBEAT_TIMEOUT;
+}
+
+function MessageBoard() {
+  const [messages, setMessages] = useState<any[]>([]);
+  const [text, setText] = useState("");
+  const [unit, setUnit] = useState(() => localStorage.getItem("laundry-unit") || UNITS[0]);
+  const [posting, setPosting] = useState(false);
+
+  useEffect(() => {
+    const messagesRef = ref(db, "messages");
+    const unsub = onValue(messagesRef, (snapshot) => {
+      const data = snapshot.val() || {};
+      const list = Object.entries(data)
+        .map(([id, msg]: any) => ({ id, ...msg }))
+        .sort((a, b) => b.ts - a.ts)
+        .slice(0, 20);
+      setMessages(list);
+    });
+    return () => unsub();
+  }, []);
+
+  const handlePost = async () => {
+    if (!text.trim()) return;
+    setPosting(true);
+    localStorage.setItem("laundry-unit", unit);
+    await push(ref(db, "messages"), {
+      text: text.trim(),
+      unit,
+      ts: Date.now(),
+    });
+    setText("");
+    setPosting(false);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column" as const, gap: 12 }}>
+      <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "20px" }}>
+        <div style={{ fontSize: 15, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 14 }}>
+          Post a message
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 12 }}>
+          {UNITS.map(u => {
+            const selected = unit === u;
+            return (
+              <button key={u} onClick={() => { setUnit(u); localStorage.setItem("laundry-unit", u); }} style={{
+                background: selected ? "#1D9E75" : "var(--color-background-secondary)",
+                border: `1.5px solid ${selected ? "#1D9E75" : "var(--color-border-secondary)"}`,
+                borderRadius: 8, padding: "8px 4px", cursor: "pointer",
+                fontSize: 13, fontWeight: selected ? 600 : 400,
+                color: selected ? "#fff" : "var(--color-text-primary)",
+                textAlign: "center" as const,
+              }}>
+                {u}
+              </button>
+            );
+          })}
+        </div>
+        <textarea
+          value={text}
+          onChange={e => setText(e.target.value)}
+          placeholder="Leave a note for your neighbors..."
+          maxLength={200}
+          rows={3}
+          style={{
+            width: "100%", background: "var(--color-background-secondary)",
+            border: "0.5px solid var(--color-border-tertiary)",
+            color: "var(--color-text-primary)", borderRadius: 10,
+            padding: "10px 12px", fontSize: 14, outline: "none",
+            resize: "none" as const, fontFamily: "inherit",
+            marginBottom: 10,
+          }}
+        />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>{text.length}/200</div>
+          <button onClick={handlePost} disabled={!text.trim() || posting} style={{
+            background: text.trim() ? "#1D9E75" : "var(--color-background-secondary)",
+            border: "none", color: text.trim() ? "#fff" : "var(--color-text-tertiary)",
+            borderRadius: 10, padding: "10px 20px", cursor: text.trim() ? "pointer" : "not-allowed",
+            fontSize: 14, fontWeight: 600,
+          }}>
+            {posting ? "Posting..." : "Post"}
+          </button>
+        </div>
+      </div>
+
+      {messages.length === 0 && (
+        <div style={{ textAlign: "center" as const, padding: "32px 24px", color: "var(--color-text-tertiary)", fontSize: 14 }}>
+          No messages yet. Be the first to post!
+        </div>
+      )}
+
+      {messages.map(msg => (
+        <div key={msg.id} style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "16px 20px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ background: "#E1F5EE", border: "0.5px solid #9FE1CB", borderRadius: 6, padding: "2px 8px", fontSize: 12, fontWeight: 600, color: "#085041" }}>
+                Unit {msg.unit}
+              </div>
+            </div>
+            <div style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>{formatAgo(msg.ts)}</div>
+          </div>
+          <div style={{ fontSize: 14, color: "var(--color-text-primary)", lineHeight: 1.5 }}>{msg.text}</div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function HowItWorks() {
@@ -280,11 +395,7 @@ function StatusBoard({ sessions, now, heartbeats }: any) {
                   ) : <div style={{ fontSize: 12, color: "var(--color-text-tertiary)", marginTop: 2 }}>Available</div>}
                 </div>
                 {sensorDown && (
-                  <button onClick={() => handleSensorWarning(m.id)} style={{
-                    background: "none", border: "none", cursor: "pointer",
-                    fontSize: 16, padding: 0, lineHeight: 1,
-                    position: "absolute" as const, top: 8, right: 8,
-                  }}>⚠️</button>
+                  <button onClick={() => handleSensorWarning(m.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, padding: 0, lineHeight: 1, position: "absolute" as const, top: 8, right: 8 }}>⚠️</button>
                 )}
               </div>
             );
@@ -316,10 +427,7 @@ function StatusBoard({ sessions, now, heartbeats }: any) {
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: progress !== null ? 10 : 0 }}>
                     <div>
                       <span style={{ fontWeight: 500, fontSize: 14, color: "var(--color-text-primary)" }}>{machine?.label}</span>
-                      {session.unit
-                        ? <span style={{ color: "var(--color-text-tertiary)", fontSize: 12, marginLeft: 8 }}>Unit {session.unit}</span>
-                        : <span style={{ color: "var(--color-text-tertiary)", fontSize: 12, marginLeft: 8 }}>unclaimed</span>
-                      }
+                      {session.unit ? <span style={{ color: "var(--color-text-tertiary)", fontSize: 12, marginLeft: 8 }}>Unit {session.unit}</span> : <span style={{ color: "var(--color-text-tertiary)", fontSize: 12, marginLeft: 8 }}>unclaimed</span>}
                       {session.cycleNum && <span style={{ color: "var(--color-text-tertiary)", fontSize: 12, marginLeft: 4 }}>· #{session.cycleNum}</span>}
                     </div>
                     <div style={{ fontSize: 13, color: accent, fontWeight: 500 }}>
@@ -421,6 +529,7 @@ export default function LaundryApp() {
   const tabs = [
     { id: "status", label: "Status" },
     { id: "claim", label: unclaimedCount > 0 ? `Claim (${unclaimedCount})` : "Claim" },
+    { id: "board", label: "Board" },
     { id: "howto", label: "How it works" },
   ];
 
@@ -429,7 +538,7 @@ export default function LaundryApp() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@300;600&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        select, input { appearance: none; }
+        select, input, textarea { appearance: none; }
       `}</style>
 
       <div style={{ borderBottom: "0.5px solid var(--color-border-tertiary)", padding: "20px 24px", background: "var(--color-background-primary)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -450,11 +559,11 @@ export default function LaundryApp() {
         </div>
       </div>
 
-      <div style={{ display: "flex", borderBottom: "0.5px solid var(--color-border-tertiary)", padding: "0 24px", background: "var(--color-background-primary)" }}>
+      <div style={{ display: "flex", borderBottom: "0.5px solid var(--color-border-tertiary)", padding: "0 16px", background: "var(--color-background-primary)", overflowX: "auto" as const }}>
         {tabs.map(tab => (
           <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
             background: "none", border: "none", cursor: "pointer",
-            padding: "14px 0", marginRight: 24, fontSize: 12,
+            padding: "14px 0", marginRight: 20, fontSize: 11, whiteSpace: "nowrap" as const,
             color: activeTab === tab.id ? "var(--color-text-primary)" : "var(--color-text-tertiary)",
             borderBottom: `2px solid ${activeTab === tab.id ? "#1D9E75" : "transparent"}`,
             letterSpacing: 1, textTransform: "uppercase" as const,
@@ -468,6 +577,7 @@ export default function LaundryApp() {
       <div style={{ padding: "20px" }}>
         {activeTab === "status" && <StatusBoard sessions={sessions} now={now} heartbeats={heartbeats} />}
         {activeTab === "claim" && <ClaimTab sessions={sessions} now={now} onClaim={handleClaim} />}
+        {activeTab === "board" && <MessageBoard />}
         {activeTab === "howto" && <HowItWorks />}
       </div>
 
