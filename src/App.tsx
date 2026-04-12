@@ -27,8 +27,8 @@ const MACHINES = {
 };
 
 const ALL_MACHINES = [...MACHINES.washers, ...MACHINES.dryers];
-
 const UNITS = ["1R","1L","1RR","2R","2L","3R","3L","4R","4L"];
+const HEARTBEAT_TIMEOUT = 5 * 60 * 1000;
 
 async function getNextCycleNumber(): Promise<number> {
   const today = new Date().toISOString().slice(0, 10);
@@ -86,6 +86,12 @@ function isExpired(session: any, now: number) {
   return now - readyAt > 45 * 60 * 1000;
 }
 
+function isSensorDown(machineId: string, heartbeats: any, now: number) {
+  const hb = heartbeats?.[machineId];
+  if (!hb?.ts) return false;
+  return now - Number(hb.ts) > HEARTBEAT_TIMEOUT;
+}
+
 function HowItWorks() {
   const steps = [
     { icon: "📡", title: "Fully automatic", body: "Each machine has a small sensor on it that detects when it's running. You don't need to press anything or sign in." },
@@ -98,14 +104,11 @@ function HowItWorks() {
   return (
     <div style={{ display: "flex", flexDirection: "column" as const, gap: 12 }}>
       <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "20px" }}>
-        <div style={{ fontSize: 22, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 6 }}>
-          No sign-in. No buttons.
-        </div>
+        <div style={{ fontSize: 22, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 6 }}>No sign-in. No buttons.</div>
         <div style={{ fontSize: 14, color: "var(--color-text-secondary)", lineHeight: 1.6 }}>
           The laundry room runs itself. Just check the Status tab to see what's available.
         </div>
       </div>
-
       {steps.map((step, i) => (
         <div key={i} style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "16px 20px", display: "flex", gap: 16, alignItems: "flex-start" }}>
           <div style={{ fontSize: 28, flexShrink: 0, marginTop: 2 }}>{step.icon}</div>
@@ -115,7 +118,6 @@ function HowItWorks() {
           </div>
         </div>
       ))}
-
       <div style={{ background: "#E1F5EE", border: "0.5px solid #9FE1CB", borderRadius: "var(--border-radius-lg)", padding: "16px 20px" }}>
         <div style={{ fontSize: 13, color: "#085041", lineHeight: 1.6 }}>
           <strong>Questions?</strong> Knock on 1RR or text the building group chat.
@@ -153,9 +155,7 @@ function ClaimTab({ sessions, now, onClaim }: any) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column" as const, gap: 16 }}>
-      <div style={{ fontSize: 14, color: "var(--color-text-secondary)" }}>
-        Tap a machine to claim it as yours.
-      </div>
+      <div style={{ fontSize: 14, color: "var(--color-text-secondary)" }}>Tap a machine to claim it as yours.</div>
       <div style={{ display: "flex", flexDirection: "column" as const, gap: 10 }}>
         {unclaimedSessions.map((s: any) => {
           const machine = ALL_MACHINES.find(m => m.id === s.machineId);
@@ -186,12 +186,9 @@ function ClaimTab({ sessions, now, onClaim }: any) {
           );
         })}
       </div>
-
       {selectedMachineId && (
         <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "20px" }}>
-          <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 12 }}>
-            Your apt number
-          </div>
+          <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 12 }}>Your apt number</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 16 }}>
             {UNITS.map(u => {
               const selected = unit === u;
@@ -199,8 +196,7 @@ function ClaimTab({ sessions, now, onClaim }: any) {
                 <button key={u} onClick={() => setUnit(u)} style={{
                   background: selected ? "#1D9E75" : "var(--color-background-secondary)",
                   border: `1.5px solid ${selected ? "#1D9E75" : "var(--color-border-secondary)"}`,
-                  borderRadius: 10, padding: "12px 8px",
-                  cursor: "pointer", fontSize: 15,
+                  borderRadius: 10, padding: "12px 8px", cursor: "pointer", fontSize: 15,
                   fontWeight: selected ? 600 : 400,
                   color: selected ? "#fff" : "var(--color-text-primary)",
                   textAlign: "center" as const,
@@ -210,11 +206,7 @@ function ClaimTab({ sessions, now, onClaim }: any) {
               );
             })}
           </div>
-          <button onClick={handleClaim} style={{
-            width: "100%", background: "#1D9E75", border: "none",
-            color: "#fff", borderRadius: 12, padding: "14px",
-            cursor: "pointer", fontSize: 15, fontWeight: 600,
-          }}>
+          <button onClick={handleClaim} style={{ width: "100%", background: "#1D9E75", border: "none", color: "#fff", borderRadius: 12, padding: "14px", cursor: "pointer", fontSize: 15, fontWeight: 600 }}>
             That's me →
           </button>
         </div>
@@ -246,7 +238,12 @@ function Notification({ note, onDismiss }: any) {
   );
 }
 
-function StatusBoard({ sessions, now }: any) {
+function StatusBoard({ sessions, now, heartbeats }: any) {
+  function handleSensorWarning(machineId: string) {
+    const machine = ALL_MACHINES.find(m => m.id === machineId);
+    alert(`⚠️ ${machine?.label} sensor is not responding.\n\nText Libby!`);
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column" as const, gap: 12 }}>
       <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: 20 }}>
@@ -262,8 +259,9 @@ function StatusBoard({ sessions, now }: any) {
             const accent = isWasher ? "#1D9E75" : "#BA7517";
             const accentLight = isWasher ? "#E1F5EE" : "#FAEEDA";
             const accentBorder = isWasher ? "#9FE1CB" : "#FAC775";
+            const sensorDown = isSensorDown(m.id, heartbeats, now);
             return (
-              <div key={m.id} style={{ background: isInUse ? accentLight : "var(--color-background-secondary)", border: `0.5px solid ${isInUse ? accentBorder : "var(--color-border-tertiary)"}`, borderRadius: "var(--border-radius-md)", padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+              <div key={m.id} style={{ background: isInUse ? accentLight : "var(--color-background-secondary)", border: `0.5px solid ${isInUse ? accentBorder : "var(--color-border-tertiary)"}`, borderRadius: "var(--border-radius-md)", padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, position: "relative" as const }}>
                 <div style={{ width: 36, height: 36, borderRadius: 8, background: isInUse ? accentBorder : "var(--color-background-primary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>
                   {isWasher ? "🫧" : "🌀"}
                 </div>
@@ -281,6 +279,13 @@ function StatusBoard({ sessions, now }: any) {
                     </>
                   ) : <div style={{ fontSize: 12, color: "var(--color-text-tertiary)", marginTop: 2 }}>Available</div>}
                 </div>
+                {sensorDown && (
+                  <button onClick={() => handleSensorWarning(m.id)} style={{
+                    background: "none", border: "none", cursor: "pointer",
+                    fontSize: 16, padding: 0, lineHeight: 1,
+                    position: "absolute" as const, top: 8, right: 8,
+                  }}>⚠️</button>
+                )}
               </div>
             );
           })}
@@ -346,6 +351,7 @@ function StatusBoard({ sessions, now }: any) {
 
 export default function LaundryApp() {
   const [sessions, setSessions] = useState<any>({});
+  const [heartbeats, setHeartbeats] = useState<any>({});
   const [now, setNow] = useState(Date.now());
   const [notifications, setNotifications] = useState<any[]>([]);
   const [notified, setNotified] = useState<any>({});
@@ -357,6 +363,14 @@ export default function LaundryApp() {
     const unsub = onValue(sessionsRef, (snapshot) => {
       setSessions(snapshot.val() || {});
       setConnected(true);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const hbRef = ref(db, "heartbeat");
+    const unsub = onValue(hbRef, (snapshot) => {
+      setHeartbeats(snapshot.val() || {});
     });
     return () => unsub();
   }, []);
@@ -452,7 +466,7 @@ export default function LaundryApp() {
       </div>
 
       <div style={{ padding: "20px" }}>
-        {activeTab === "status" && <StatusBoard sessions={sessions} now={now} />}
+        {activeTab === "status" && <StatusBoard sessions={sessions} now={now} heartbeats={heartbeats} />}
         {activeTab === "claim" && <ClaimTab sessions={sessions} now={now} onClaim={handleClaim} />}
         {activeTab === "howto" && <HowItWorks />}
       </div>
