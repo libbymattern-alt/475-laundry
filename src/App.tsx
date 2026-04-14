@@ -101,8 +101,15 @@ function isRunning(session: any) {
 
 function isSensorDown(machineId: string, heartbeats: any, now: number) {
   const hb = heartbeats?.[machineId];
-  if (!hb?.ts) return false;
-  return now - Number(hb.ts) > HEARTBEAT_TIMEOUT;
+  if (!hb) return true;
+  if (hb.online === false) return true;
+  const ts = Number(hb.ts);
+  if (ts > 1000000000000) {
+    // Real Unix ms timestamp — compare normally
+    return now - ts > HEARTBEAT_TIMEOUT;
+  }
+  // ESP32 uptime seconds — just trust online field
+  return false;
 }
 
 function MessageBoard() {
