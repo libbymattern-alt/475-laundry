@@ -13,7 +13,7 @@ const firebaseConfig = {
 };
 
 const firebaseApp = initializeApp(firebaseConfig);
-const db = getDatabase(firebaseApp);
+const db = getDatabase(firebaseApp); 
 
 const MACHINES = {
   washers: [
