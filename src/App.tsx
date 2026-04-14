@@ -13,7 +13,7 @@ const firebaseConfig = {
 };
 
 const firebaseApp = initializeApp(firebaseConfig);
-const db = getDatabase(firebaseApp); 
+const db = getDatabase(firebaseApp);
 
 const MACHINES = {
   washers: [
@@ -93,6 +93,10 @@ function isExpired(session: any, now: number) {
   if (!st || isNaN(st) || st < 1000000000000) return false;
   const readyAt = session.durationMs ? st + session.durationMs : st;
   return now - readyAt > 45 * 60 * 1000;
+}
+
+function isRunning(session: any) {
+  return session?.status === "running";
 }
 
 function isSensorDown(machineId: string, heartbeats: any, now: number) {
@@ -247,7 +251,7 @@ function ClaimTab({ sessions, now, onClaim }: any) {
   const [selectedMachineId, setSelectedMachineId] = useState("");
 
   const unclaimedSessions = Object.entries(sessions)
-    .filter(([, s]: any) => s?.source === "sensor" && s?.status === "running" && !s?.unit && !isExpired(s, now))
+    .filter(([, s]: any) => s?.source === "sensor" && isRunning(s) && !s?.unit && !isExpired(s, now))
     .map(([machineId, s]: any) => ({ machineId, ...s }));
 
   const handleClaim = () => {
@@ -366,8 +370,9 @@ function StatusBoard({ sessions, now, heartbeats }: any) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           {ALL_MACHINES.map((m: any) => {
             const session = sessions[m.id];
+            const running = isRunning(session);
             const expired = isExpired(session, now);
-            const isInUse = !!session && !expired;
+            const isInUse = running && !expired;
             const done = isDone(session, now);
             const remaining = getRemaining(session, now);
             const isWasher = m.type === "washer";
@@ -403,17 +408,17 @@ function StatusBoard({ sessions, now, heartbeats }: any) {
         </div>
       </div>
 
-      {Object.keys(sessions).filter(id => !isExpired(sessions[id], now)).length === 0 && (
+      {Object.keys(sessions).filter(id => isRunning(sessions[id]) && !isExpired(sessions[id], now)).length === 0 && (
         <div style={{ textAlign: "center" as const, padding: "48px 24px", color: "var(--color-text-tertiary)", fontSize: 18 }}>
           All machines are free ✦
         </div>
       )}
 
-      {Object.keys(sessions).filter(id => !isExpired(sessions[id], now)).length > 0 && (
+      {Object.keys(sessions).filter(id => isRunning(sessions[id]) && !isExpired(sessions[id], now)).length > 0 && (
         <div>
           <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", letterSpacing: 2, textTransform: "uppercase" as const, marginBottom: 12 }}>Active sessions</div>
           {Object.entries(sessions)
-            .filter(([, session]: any) => !isExpired(session, now))
+            .filter(([, session]: any) => isRunning(session) && !isExpired(session, now))
             .map(([machineId, session]: any) => {
               const machine = ALL_MACHINES.find(m => m.id === machineId);
               const done = isDone(session, now);
@@ -494,7 +499,7 @@ export default function LaundryApp() {
 
   useEffect(() => {
     Object.entries(sessions).forEach(([machineId, session]: any) => {
-      if (!session || isExpired(session, now)) return;
+      if (!session || !isRunning(session) || isExpired(session, now)) return;
       const done = isDone(session, now);
       if (done && !notified[machineId]) {
         setNotified((prev: any) => ({ ...prev, [machineId]: true }));
@@ -518,12 +523,14 @@ export default function LaundryApp() {
     set(ref(db, `sessions/${machineId}/unit`), unit);
   }, []);
 
-  const activeSessions = Object.keys(sessions).filter(id => !isExpired(sessions[id], now));
+  const activeSessions = Object.keys(sessions).filter(id =>
+    isRunning(sessions[id]) && !isExpired(sessions[id], now)
+  );
   const inUseCount = activeSessions.length;
   const freeCount = 4 - inUseCount;
   const unclaimedCount = activeSessions.filter(id => {
     const s = sessions[id];
-    return s?.source === "sensor" && s?.status === "running" && !s?.unit;
+    return s?.source === "sensor" && isRunning(s) && !s?.unit;
   }).length;
 
   const tabs = [
