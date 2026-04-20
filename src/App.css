@@ -510,7 +510,7 @@ function StatusBoard({ sessions, manuals, now }: any) {
             const accentLight = isWasher ? "#E1F5EE" : "#FAEEDA";
             const accentBorder = isWasher ? "#9FE1CB" : "#FAC775";
             // Use unit from manual session first, then sensor session
-            const displayUnit = manualSession?.unit || sensorSession?.unit;
+            const displayUnit = manualSession?.unit || (manualSession ? null : sensorSession?.unit);
 
             return (
               <div key={m.id} style={{
@@ -569,7 +569,7 @@ function StatusBoard({ sessions, manuals, now }: any) {
             const remaining = getRemaining(sensorSession, now);
             // Only show Done if sensor is actually running and has a duration timer
             const done = sensorRunning ? isDone(sensorSession, now) : false;
-            const displayUnit = manualSession?.unit || (sensorSession?.unit || "");
+            const displayUnit = manualSession?.unit || (manualSession ? "" : (sensorSession?.unit || ""));
 
             return (
               <div key={m.id} style={{ background: "var(--color-background-primary)", border: `0.5px solid ${accentBorder}`, borderRadius: "var(--border-radius-md)", padding: "14px 16px", marginBottom: 8 }}>
@@ -648,26 +648,37 @@ export default function LaundryApp() {
   const [activeTab, setActiveTab] = useState("status");
   const [connected, setConnected] = useState(false);
   const [lastCycleNums, setLastCycleNums] = useState<any>({});
+  const [lastStatuses, setLastStatuses] = useState<any>({});
 
   useEffect(() => {
     const unsub = onValue(ref(db, "sessions"), (snapshot) => {
       const data = snapshot.val() || {};
       setSessions(data);
       setConnected(true);
-      // Auto-clear stale unit when a new cycle starts
-      setLastCycleNums((prev: any) => {
-        const next = { ...prev };
-        ALL_MACHINES.forEach(m => {
-          const s = data[m.id];
-          if (!s) return;
-          const newCycle = s.cycleNum;
-          const oldCycle = prev[m.id];
-          if (newCycle && oldCycle && newCycle !== oldCycle && s.unit) {
-            set(ref(db, `sessions/${m.id}/unit`), null);
-          }
-          if (newCycle) next[m.id] = newCycle;
+      // Auto-clear stale unit when a new cycle starts OR status flips back to running
+      setLastCycleNums((prevCycles: any) => {
+        const nextCycles = { ...prevCycles };
+        setLastStatuses((prevStatuses: any) => {
+          const nextStatuses = { ...prevStatuses };
+          ALL_MACHINES.forEach(m => {
+            const s = data[m.id];
+            if (!s) return;
+            const newCycle = s.cycleNum;
+            const oldCycle = prevCycles[m.id];
+            const newStatus = s.status;
+            const oldStatus = prevStatuses[m.id];
+            // Clear unit if: new cycle number, OR status just flipped to running
+            const isNewCycle = newCycle && oldCycle && newCycle !== oldCycle;
+            const justStartedRunning = newStatus === "running" && oldStatus && oldStatus !== "running";
+            if ((isNewCycle || justStartedRunning) && s.unit) {
+              set(ref(db, `sessions/${m.id}/unit`), null);
+            }
+            if (newCycle) nextCycles[m.id] = newCycle;
+            if (newStatus) nextStatuses[m.id] = newStatus;
+          });
+          return nextStatuses;
         });
-        return next;
+        return nextCycles;
       });
     });
     return () => unsub();
