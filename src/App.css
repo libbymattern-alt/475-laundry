@@ -112,11 +112,25 @@ function isSensorDown(machineId: string, heartbeats: any, now: number) {
   return false;
 }
 
+const DURATION_PRESETS = [
+  { label: "30 min", value: 30 },
+  { label: "45 min", value: 45 },
+  { label: "55 min", value: 55 },
+  { label: "1:20", value: 80 },
+];
+
 // ── Claim + Override Tab ──────────────────────────────────────────────────────
 function ClaimTab({ sessions, manuals, now, onClaim, onManualStart, onManualDone }: any) {
   const [unit, setUnit] = useState(() => localStorage.getItem("laundry-unit") || UNITS[0]);
   const [selectedMachineId, setSelectedMachineId] = useState("");
   const [mode, setMode] = useState<"claim" | "override" | "clear" | null>(null);
+  const [durationMins, setDurationMins] = useState<number | null>(55);
+  const [customDuration, setCustomDuration] = useState("");
+  const [showCustom, setShowCustom] = useState(false);
+
+  const effectiveDuration = showCustom
+    ? (parseInt(customDuration) || null)
+    : durationMins;
 
   const handleSelect = (machineId: string, newMode: "claim" | "override" | "clear") => {
     if (selectedMachineId === machineId && mode === newMode) {
@@ -133,7 +147,7 @@ function ClaimTab({ sessions, manuals, now, onClaim, onManualStart, onManualDone
     if (mode === "claim") {
       onClaim(selectedMachineId, unit);
     } else if (mode === "override") {
-      await onManualStart(selectedMachineId, unit);
+      await onManualStart(selectedMachineId, unit, effectiveDuration ? effectiveDuration * 60 * 1000 : null);
     }
     setSelectedMachineId("");
     setMode(null);
@@ -266,8 +280,68 @@ function ClaimTab({ sessions, manuals, now, onClaim, onManualStart, onManualDone
                     );
                   })}
                 </div>
-                <button onClick={handleAction} style={{ width: "100%", background: accent, border: "none", color: "#fff", borderRadius: 12, padding: "14px", cursor: "pointer", fontSize: 15, fontWeight: 600 }}>
-                  {mode === "claim" ? "That's my load →" : "Start my cycle →"}
+                {mode === "override" && (
+                  <>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 10 }}>
+                      Cycle duration
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6, marginBottom: 10 }}>
+                      {DURATION_PRESETS.map(p => {
+                        const sel = !showCustom && durationMins === p.value;
+                        return (
+                          <button key={p.value} onClick={() => { setDurationMins(p.value); setShowCustom(false); }} style={{
+                            background: sel ? accent : "var(--color-background-secondary)",
+                            border: `1.5px solid ${sel ? accent : "var(--color-border-secondary)"}`,
+                            borderRadius: 10, padding: "10px 4px", cursor: "pointer", fontSize: 13,
+                            fontWeight: sel ? 600 : 400,
+                            color: sel ? "#fff" : "var(--color-text-primary)",
+                            textAlign: "center" as const,
+                          }}>{p.label}</button>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+                      <button onClick={() => { setShowCustom(true); setDurationMins(null); }} style={{
+                        background: showCustom ? accent : "var(--color-background-secondary)",
+                        border: `1.5px solid ${showCustom ? accent : "var(--color-border-secondary)"}`,
+                        borderRadius: 10, padding: "10px 14px", cursor: "pointer", fontSize: 13,
+                        fontWeight: showCustom ? 600 : 400,
+                        color: showCustom ? "#fff" : "var(--color-text-primary)",
+                        whiteSpace: "nowrap" as const,
+                      }}>Custom</button>
+                      {showCustom && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1 }}>
+                          <input
+                            type="number" min="1" max="240"
+                            value={customDuration}
+                            onChange={e => setCustomDuration(e.target.value)}
+                            placeholder="e.g. 70"
+                            style={{
+                              flex: 1, background: "var(--color-background-secondary)",
+                              border: "1.5px solid var(--color-border-secondary)",
+                              borderRadius: 10, padding: "10px 12px", fontSize: 15,
+                              color: "var(--color-text-primary)", outline: "none",
+                            }}
+                          />
+                          <span style={{ fontSize: 13, color: "var(--color-text-tertiary)" }}>min</span>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+                <button
+                  onClick={handleAction}
+                  disabled={mode === "override" && !effectiveDuration}
+                  style={{
+                    width: "100%",
+                    background: (mode === "override" && !effectiveDuration) ? "var(--color-background-secondary)" : accent,
+                    border: "none",
+                    color: (mode === "override" && !effectiveDuration) ? "var(--color-text-tertiary)" : "#fff",
+                    borderRadius: 12, padding: "14px",
+                    cursor: (mode === "override" && !effectiveDuration) ? "not-allowed" : "pointer",
+                    fontSize: 15, fontWeight: 600,
+                  }}>
+                  {mode === "claim" ? "That's my load →" : effectiveDuration ? `Start ${effectiveDuration} min cycle →` : "Pick a duration first"}
                 </button>
               </div>
             )}
@@ -646,12 +720,13 @@ export default function LaundryApp() {
     set(ref(db, `sessions/${machineId}/unit`), unit);
   }, []);
 
-  const handleManualStart = useCallback(async (machineId: string, unit: string) => {
+  const handleManualStart = useCallback(async (machineId: string, unit: string, durationMs: number | null) => {
     const cycleNum = await getNextCycleNumber();
     await set(ref(db, `manual/${machineId}`), {
       unit,
       startTime: Date.now(),
       cycleNum,
+      ...(durationMs ? { durationMs } : {}),
     });
   }, []);
 
