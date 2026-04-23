@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { initializeApp } from "firebase/app";
 import { getDatabase, ref, onValue, set, remove, runTransaction, push } from "firebase/database";
 
+// ── Firebase ──────────────────────────────────────────────────────────────────
 const firebaseConfig = {
   apiKey: "AIzaSyAX8f3ITqqM-ubR41aALbWyuHzKO0hWqv0",
   authDomain: "laundry-fd0a4.firebaseapp.com",
@@ -11,25 +12,25 @@ const firebaseConfig = {
   messagingSenderId: "859520322947",
   appId: "1:859520322947:web:7a835161605325122cfab6",
 };
-
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getDatabase(firebaseApp);
 
-const MACHINES = {
-  washers: [
-    { id: "w1", label: "Washer 1", type: "washer" },
-    { id: "w2", label: "Washer 2", type: "washer" },
-  ],
-  dryers: [
-    { id: "d1", label: "Dryer 1", type: "dryer" },
-    { id: "d2", label: "Dryer 2", type: "dryer" },
-  ],
-};
-
-const ALL_MACHINES = [...MACHINES.washers, ...MACHINES.dryers];
+// ── Constants ─────────────────────────────────────────────────────────────────
+const ALL_MACHINES = [
+  { id: "w1", label: "Washer 1", type: "washer" },
+  { id: "w2", label: "Washer 2", type: "washer" },
+  { id: "d1", label: "Dryer 1",  type: "dryer"  },
+  { id: "d2", label: "Dryer 2",  type: "dryer"  },
+];
 const UNITS = ["1R","1L","1RR","2R","2L","3R","3L","4R","4L"];
-const HEARTBEAT_TIMEOUT = 5 * 60 * 1000;
+const DURATION_PRESETS = [
+  { label: "30 min", value: 30 },
+  { label: "45 min", value: 45 },
+  { label: "55 min", value: 55 },
+  { label: "1:20",   value: 80 },
+];
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
 async function getNextCycleNumber(): Promise<number> {
   const today = new Date().toISOString().slice(0, 10);
   const counterRef = ref(db, `cycleCounter/${today}`);
@@ -41,17 +42,49 @@ async function getNextCycleNumber(): Promise<number> {
   return cycleNum;
 }
 
+function isRunning(session: any) {
+  return session?.status === "running";
+}
+
+function isExpired(session: any, now: number) {
+  if (!session || session.status !== "ready") return false;
+  const st = Number(session.startTime);
+  if (!st || isNaN(st) || st < 1_000_000_000_000) return false;
+  const readyAt = session.durationMs ? st + session.durationMs : st;
+  return now - readyAt > 45 * 60 * 1000;
+}
+
+function getRemaining(session: any, now: number): number | null {
+  if (!session?.durationMs || !session?.startTime) return null;
+  const st = Number(session.startTime);
+  if (!st || isNaN(st) || st < 1_000_000_000_000) return null;
+  return Math.max(0, session.durationMs - (now - st));
+}
+
+function getProgress(session: any, now: number): number | null {
+  if (!session?.durationMs || !session?.startTime) return null;
+  const st = Number(session.startTime);
+  if (!st || isNaN(st) || st < 1_000_000_000_000) return null;
+  return Math.min(1, (now - st) / session.durationMs);
+}
+
+function isDone(session: any, now: number) {
+  if (!session) return false;
+  if (session.status === "ready") return true;
+  const remaining = getRemaining(session, now);
+  return remaining !== null && remaining <= 0;
+}
+
 function formatTime(ms: number) {
   if (ms <= 0) return "Done!";
-  const totalSec = Math.floor(ms / 1000);
-  const m = Math.floor(totalSec / 60);
-  const s = totalSec % 60;
+  const m = Math.floor(ms / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
 function formatRunning(session: any, now: number) {
   const st = Number(session?.startTime);
-  if (st && !isNaN(st) && st > 1000000000000) {
+  if (st && !isNaN(st) && st > 1_000_000_000_000) {
     const mins = Math.floor((now - st) / 60000);
     if (mins < 1) return "just started";
     return `running ${mins} min`;
@@ -68,95 +101,176 @@ function formatAgo(ts: number) {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-function getRemaining(session: any, now: number) {
-  if (!session?.durationMs || !session?.startTime) return null;
-  const st = Number(session.startTime);
-  if (!st || isNaN(st) || st < 1000000000000) return null;
-  return Math.max(0, session.durationMs - (now - st));
-}
+// ── Status Board ──────────────────────────────────────────────────────────────
+function StatusBoard({ sessions, manuals, now }: any) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column" as const, gap: 12 }}>
 
-function getProgress(session: any, now: number) {
-  if (!session?.durationMs || !session?.startTime) return null;
-  const st = Number(session.startTime);
-  if (!st || isNaN(st) || st < 1000000000000) return null;
-  return Math.min(1, (now - st) / session.durationMs);
-}
+      {/* Quick overview grid */}
+      <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: 20 }}>
+        <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", letterSpacing: 2, textTransform: "uppercase" as const, marginBottom: 16 }}>Quick overview</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          {ALL_MACHINES.map(m => {
+            const sensor = sessions[m.id];
+            const manual = manuals[m.id];
+            const sensorOn = isRunning(sensor) && !isExpired(sensor, now);
+            const manualOn = !!manual;
+            const inUse = sensorOn || manualOn;
+            const isWasher = m.type === "washer";
+            const accent = isWasher ? "#1D9E75" : "#BA7517";
+            const accentLight = isWasher ? "#E1F5EE" : "#FAEEDA";
+            const accentBorder = isWasher ? "#9FE1CB" : "#FAC775";
+            // Unit: manual takes precedence; sensor unit only shown if sensor claimed this cycle
+            const displayUnit = manual?.unit || sensor?.unit || null;
 
-function isDone(session: any, now: number) {
-  if (!session) return false;
-  if (session.status === "ready") return true;
-  const remaining = getRemaining(session, now);
-  return remaining !== null && remaining <= 0;
-}
+            return (
+              <div key={m.id} style={{
+                background: inUse ? accentLight : "var(--color-background-secondary)",
+                border: `0.5px solid ${inUse ? accentBorder : "var(--color-border-tertiary)"}`,
+                borderRadius: "var(--border-radius-md)", padding: "14px 16px",
+                display: "flex", alignItems: "center", gap: 12,
+              }}>
+                <div style={{ width: 36, height: 36, borderRadius: 8, background: inUse ? accentBorder : "var(--color-background-primary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>
+                  {isWasher ? "🫧" : "🌀"}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 500, color: "var(--color-text-primary)" }}>{m.label}</div>
+                  {inUse ? (
+                    <>
+                      <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginTop: 1 }}>
+                        {displayUnit ? `Unit ${displayUnit}` : "unclaimed"}
+                        {(sensor?.cycleNum || manual?.cycleNum) ? ` · cycle ${sensor?.cycleNum || manual?.cycleNum}` : ""}
+                      </div>
+                      <div style={{ fontSize: 12, color: accent, marginTop: 3, fontWeight: 500 }}>
+                        {sensorOn && manualOn
+                          ? `📡 ${formatRunning(sensor, now)} · ✋ ${formatRunning(manual, now)}`
+                          : sensorOn
+                          ? `📡 ${formatRunning(sensor, now)}`
+                          : `✋ ${formatRunning(manual, now)}`}
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ fontSize: 12, color: "var(--color-text-tertiary)", marginTop: 2 }}>Available</div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
-function isExpired(session: any, now: number) {
-  if (!session || session.status !== "ready") return false;
-  const st = Number(session.startTime);
-  if (!st || isNaN(st) || st < 1000000000000) return false;
-  const readyAt = session.durationMs ? st + session.durationMs : st;
-  return now - readyAt > 45 * 60 * 1000;
-}
+      {/* Empty state */}
+      {!ALL_MACHINES.some(m => (isRunning(sessions[m.id]) && !isExpired(sessions[m.id], now)) || !!manuals[m.id]) && (
+        <div style={{ textAlign: "center" as const, padding: "48px 24px", color: "var(--color-text-tertiary)", fontSize: 18 }}>
+          All machines are free ✦
+        </div>
+      )}
 
-function isRunning(session: any) {
-  return session?.status === "running";
-}
+      {/* Active sessions list */}
+      {ALL_MACHINES.some(m => (isRunning(sessions[m.id]) && !isExpired(sessions[m.id], now)) || !!manuals[m.id]) && (
+        <div>
+          <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", letterSpacing: 2, textTransform: "uppercase" as const, marginBottom: 12 }}>Active sessions</div>
+          {ALL_MACHINES.map(m => {
+            const sensor = sessions[m.id];
+            const manual = manuals[m.id];
+            const sensorOn = isRunning(sensor) && !isExpired(sensor, now);
+            const manualOn = !!manual;
+            if (!sensorOn && !manualOn) return null;
 
-function isSensorDown(machineId: string, heartbeats: any, now: number) {
-  const hb = heartbeats?.[machineId];
-  if (!hb) return true;
-  if (hb.online === false) return true;
-  const ts = Number(hb.ts);
-  if (ts > 1000000000000) {
-    return now - ts > HEARTBEAT_TIMEOUT;
-  }
-  return false;
-}
+            const isWasher = m.type === "washer";
+            const accent = isWasher ? "#1D9E75" : "#BA7517";
+            const accentBorder = isWasher ? "#9FE1CB" : "#FAC775";
+            const displayUnit = manual?.unit || sensor?.unit || null;
 
-const DURATION_PRESETS = [
-  { label: "30 min", value: 30 },
-  { label: "45 min", value: 45 },
-  { label: "55 min", value: 55 },
-  { label: "1:20", value: 80 },
-];
+            // For timer display, prefer manual if it has a duration, else sensor
+            const timerSession = manual?.durationMs ? manual : sensor;
+            const remaining = getRemaining(timerSession, now);
+            const progress = getProgress(timerSession, now);
+            const done = sensorOn ? isDone(sensor, now) : false;
+
+            return (
+              <div key={m.id} style={{ background: "var(--color-background-primary)", border: `0.5px solid ${accentBorder}`, borderRadius: "var(--border-radius-md)", padding: "14px 16px", marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <div>
+                    <span style={{ fontWeight: 500, fontSize: 14, color: "var(--color-text-primary)" }}>{m.label}</span>
+                    <span style={{ color: "var(--color-text-tertiary)", fontSize: 12, marginLeft: 8 }}>
+                      {displayUnit ? `Unit ${displayUnit}` : "unclaimed"}
+                    </span>
+                    {(sensor?.cycleNum || manual?.cycleNum) && (
+                      <span style={{ color: "var(--color-text-tertiary)", fontSize: 12, marginLeft: 4 }}>
+                        · #{sensor?.cycleNum || manual?.cycleNum}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 13, color: accent, fontWeight: 500 }}>
+                    {done ? "Done!" : remaining !== null ? formatTime(remaining) : "running"}
+                  </div>
+                </div>
+
+                {/* Source rows */}
+                {sensorOn && (
+                  <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginBottom: 2 }}>
+                    📡 sensor · {formatRunning(sensor, now)}
+                  </div>
+                )}
+                {manualOn && (
+                  <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginBottom: 2 }}>
+                    ✋ manual · Unit {manual.unit} · {formatRunning(manual, now)}
+                  </div>
+                )}
+
+                {/* Progress bar */}
+                {progress !== null && (
+                  <>
+                    <div style={{ height: 3, background: "var(--color-background-secondary)", borderRadius: 2, overflow: "hidden", marginTop: 8 }}>
+                      <div style={{ height: "100%", width: `${progress * 100}%`, background: accent, transition: "width 1s linear" }} />
+                    </div>
+                    <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", marginTop: 4, textAlign: "right" as const }}>
+                      {Math.round(progress * 100)}% complete
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Claim + Override Tab ──────────────────────────────────────────────────────
 function ClaimTab({ sessions, manuals, now, onClaim, onManualStart, onManualDone }: any) {
   const [unit, setUnit] = useState(() => localStorage.getItem("laundry-unit") || UNITS[0]);
-  const [selectedMachineId, setSelectedMachineId] = useState("");
+  const [selectedId, setSelectedId] = useState("");
   const [mode, setMode] = useState<"claim" | "override" | "clear" | null>(null);
-  const [durationMins, setDurationMins] = useState<number | null>(55);
-  const [customDuration, setCustomDuration] = useState("");
+  const [durationMins, setDurationMins] = useState<number>(55);
   const [showCustom, setShowCustom] = useState(false);
+  const [customDuration, setCustomDuration] = useState("");
 
-  const effectiveDuration = showCustom
-    ? (parseInt(customDuration) || null)
-    : durationMins;
+  const effectiveDuration = showCustom ? (parseInt(customDuration) || 0) : durationMins;
 
-  const handleSelect = (machineId: string, newMode: "claim" | "override" | "clear") => {
-    if (selectedMachineId === machineId && mode === newMode) {
-      setSelectedMachineId("");
-      setMode(null);
+  const selectMode = (machineId: string, newMode: "claim" | "override" | "clear") => {
+    if (selectedId === machineId && mode === newMode) {
+      setSelectedId(""); setMode(null);
     } else {
-      setSelectedMachineId(machineId);
-      setMode(newMode);
+      setSelectedId(machineId); setMode(newMode);
     }
   };
 
   const handleAction = async () => {
     localStorage.setItem("laundry-unit", unit);
     if (mode === "claim") {
-      onClaim(selectedMachineId, unit);
-    } else if (mode === "override") {
-      await onManualStart(selectedMachineId, unit, effectiveDuration ? effectiveDuration * 60 * 1000 : null);
+      onClaim(selectedId, unit);
+    } else if (mode === "override" && effectiveDuration > 0) {
+      await onManualStart(selectedId, unit, effectiveDuration * 60 * 1000);
     }
-    setSelectedMachineId("");
-    setMode(null);
+    setSelectedId(""); setMode(null);
   };
 
   const handleClear = async (machineId: string) => {
     await onManualDone(machineId);
-    setSelectedMachineId("");
-    setMode(null);
+    setSelectedId(""); setMode(null);
   };
 
   return (
@@ -164,50 +278,49 @@ function ClaimTab({ sessions, manuals, now, onClaim, onManualStart, onManualDone
       <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "16px 20px" }}>
         <div style={{ fontSize: 15, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 4 }}>Claim or override</div>
         <div style={{ fontSize: 13, color: "var(--color-text-secondary)", lineHeight: 1.5 }}>
-          Claim a sensor-detected cycle or manually mark a machine as yours. Both can coexist — the sensor and manual sessions are independent.
+          Claim a sensor-detected cycle, or manually mark a machine as yours if the sensor missed it. Both can coexist.
         </div>
       </div>
 
-      {ALL_MACHINES.map((m: any) => {
-        const sensorSession = sessions[m.id];
-        const manualSession = manuals[m.id];
-        const sensorRunning = isRunning(sensorSession) && !isExpired(sensorSession, now);
-        const manualRunning = !!manualSession;
-        const isInUse = sensorRunning || manualRunning;
-        const sensorClaimed = sensorRunning && !!sensorSession?.unit;
+      {ALL_MACHINES.map(m => {
+        const sensor = sessions[m.id];
+        const manual = manuals[m.id];
+        const sensorOn = isRunning(sensor) && !isExpired(sensor, now);
+        const manualOn = !!manual;
+        const inUse = sensorOn || manualOn;
+        const sensorClaimed = sensorOn && !!sensor?.unit;
         const isWasher = m.type === "washer";
         const accent = isWasher ? "#1D9E75" : "#BA7517";
         const accentLight = isWasher ? "#E1F5EE" : "#FAEEDA";
         const accentBorder = isWasher ? "#9FE1CB" : "#FAC775";
-        const selected = selectedMachineId === m.id;
+        const sel = selectedId === m.id;
 
         return (
           <div key={m.id} style={{ display: "flex", flexDirection: "column" as const, gap: 4 }}>
-            {/* Machine card */}
+
+            {/* Machine card — read only, no tap */}
             <div style={{
-              background: isInUse ? accentLight : "var(--color-background-primary)",
-              border: `0.5px solid ${isInUse ? accentBorder : "var(--color-border-tertiary)"}`,
+              background: inUse ? accentLight : "var(--color-background-primary)",
+              border: `0.5px solid ${inUse ? accentBorder : "var(--color-border-tertiary)"}`,
               borderRadius: "var(--border-radius-lg)", padding: "16px 20px",
               display: "flex", alignItems: "center", gap: 14,
             }}>
-              <div style={{ width: 48, height: 48, borderRadius: 12, background: isInUse ? accentBorder : "var(--color-background-secondary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0 }}>
+              <div style={{ width: 48, height: 48, borderRadius: 12, background: inUse ? accentBorder : "var(--color-background-secondary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0 }}>
                 {isWasher ? "🫧" : "🌀"}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 16, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 4 }}>{m.label}</div>
-                {/* Sensor row */}
-                {sensorRunning && (
+                {sensorOn && (
                   <div style={{ fontSize: 12, color: accent, marginBottom: 2 }}>
-                    📡 sensor · {sensorClaimed ? `Unit ${sensorSession.unit}` : "unclaimed"} · {formatRunning(sensorSession, now)}
+                    📡 sensor · {sensorClaimed ? `Unit ${sensor.unit}` : "unclaimed"} · {formatRunning(sensor, now)}
                   </div>
                 )}
-                {/* Manual row */}
-                {manualRunning && (
+                {manualOn && (
                   <div style={{ fontSize: 12, color: accent, marginBottom: 2 }}>
-                    ✋ manual · Unit {manualSession.unit} · {formatRunning(manualSession, now)}
+                    ✋ manual · Unit {manual.unit} · {formatRunning(manual, now)}
                   </div>
                 )}
-                {!isInUse && (
+                {!inUse && (
                   <div style={{ fontSize: 12, color: "var(--color-text-tertiary)" }}>available</div>
                 )}
               </div>
@@ -215,138 +328,141 @@ function ClaimTab({ sessions, manuals, now, onClaim, onManualStart, onManualDone
 
             {/* Action buttons */}
             <div style={{ display: "flex", gap: 6, paddingLeft: 4 }}>
-              {/* Claim button — only if sensor running and unclaimed */}
-              {sensorRunning && !sensorClaimed && (
-                <button
-                  onClick={() => handleSelect(m.id, "claim")}
-                  style={{
-                    flex: 1, background: selected && mode === "claim" ? accentLight : "var(--color-background-primary)",
-                    border: `1.5px solid ${selected && mode === "claim" ? accent : accentBorder}`,
-                    borderRadius: 10, padding: "10px 12px", cursor: "pointer",
-                    fontSize: 12, fontWeight: 600, color: accent, textAlign: "center" as const,
-                  }}
-                >
+              {sensorOn && !sensorClaimed && (
+                <button onClick={() => selectMode(m.id, "claim")} style={{
+                  flex: 1, background: sel && mode === "claim" ? accentLight : "var(--color-background-primary)",
+                  border: `1.5px solid ${sel && mode === "claim" ? accent : accentBorder}`,
+                  borderRadius: 10, padding: "10px 12px", cursor: "pointer",
+                  fontSize: 12, fontWeight: 600, color: accent, textAlign: "center" as const,
+                }}>
                   Claim sensor cycle
                 </button>
               )}
-              {/* Override button — always available */}
-              {!manualRunning && (
-                <button
-                  onClick={() => handleSelect(m.id, "override")}
-                  style={{
-                    flex: 1, background: selected && mode === "override" ? accentLight : "var(--color-background-primary)",
-                    border: `1.5px solid ${selected && mode === "override" ? accent : "var(--color-border-secondary)"}`,
-                    borderRadius: 10, padding: "10px 12px", cursor: "pointer",
-                    fontSize: 12, fontWeight: 500, color: "var(--color-text-secondary)", textAlign: "center" as const,
-                  }}
-                >
+              {!manualOn && (
+                <button onClick={() => selectMode(m.id, "override")} style={{
+                  flex: 1, background: sel && mode === "override" ? accentLight : "var(--color-background-primary)",
+                  border: `1.5px solid ${sel && mode === "override" ? accent : "var(--color-border-secondary)"}`,
+                  borderRadius: 10, padding: "10px 12px", cursor: "pointer",
+                  fontSize: 12, fontWeight: 500, color: "var(--color-text-secondary)", textAlign: "center" as const,
+                }}>
                   Mark as mine
                 </button>
               )}
-              {/* Clear manual button */}
-              {manualRunning && (
-                <button
-                  onClick={() => handleSelect(m.id, "clear")}
-                  style={{
-                    flex: 1, background: selected && mode === "clear" ? "#FFF0F0" : "var(--color-background-primary)",
-                    border: `1.5px solid ${selected && mode === "clear" ? "#E57373" : "var(--color-border-secondary)"}`,
-                    borderRadius: 10, padding: "10px 12px", cursor: "pointer",
-                    fontSize: 12, fontWeight: 500, color: "#E57373", textAlign: "center" as const,
-                  }}
-                >
+              {manualOn && (
+                <button onClick={() => selectMode(m.id, "clear")} style={{
+                  flex: 1, background: sel && mode === "clear" ? "#FFF0F0" : "var(--color-background-primary)",
+                  border: `1.5px solid ${sel && mode === "clear" ? "#E57373" : "var(--color-border-secondary)"}`,
+                  borderRadius: 10, padding: "10px 12px", cursor: "pointer",
+                  fontSize: 12, fontWeight: 500, color: "#E57373", textAlign: "center" as const,
+                }}>
                   Clear manual
                 </button>
               )}
             </div>
 
-            {/* Expanded panel */}
-            {selected && (mode === "claim" || mode === "override") && (
+            {/* Claim panel */}
+            {sel && mode === "claim" && (
               <div style={{ background: "var(--color-background-primary)", border: `0.5px solid ${accentBorder}`, borderRadius: "var(--border-radius-lg)", padding: "16px 20px" }}>
                 <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 12 }}>
-                  {mode === "claim" ? "Claim this sensor cycle — your apt" : "Mark as in use — your apt"}
+                  Claim this cycle — your apt
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 16 }}>
-                  {UNITS.map(u => {
-                    const sel = unit === u;
-                    return (
-                      <button key={u} onClick={() => setUnit(u)} style={{
-                        background: sel ? accent : "var(--color-background-secondary)",
-                        border: `1.5px solid ${sel ? accent : "var(--color-border-secondary)"}`,
-                        borderRadius: 10, padding: "12px 8px", cursor: "pointer", fontSize: 15,
-                        fontWeight: sel ? 600 : 400,
-                        color: sel ? "#fff" : "var(--color-text-primary)",
-                        textAlign: "center" as const,
-                      }}>{u}</button>
-                    );
-                  })}
+                  {UNITS.map(u => (
+                    <button key={u} onClick={() => setUnit(u)} style={{
+                      background: unit === u ? accent : "var(--color-background-secondary)",
+                      border: `1.5px solid ${unit === u ? accent : "var(--color-border-secondary)"}`,
+                      borderRadius: 10, padding: "12px 8px", cursor: "pointer", fontSize: 15,
+                      fontWeight: unit === u ? 600 : 400,
+                      color: unit === u ? "#fff" : "var(--color-text-primary)",
+                      textAlign: "center" as const,
+                    }}>{u}</button>
+                  ))}
                 </div>
-                {mode === "override" && (
-                  <>
-                    <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 10 }}>
-                      Cycle duration
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6, marginBottom: 10 }}>
-                      {DURATION_PRESETS.map(p => {
-                        const sel = !showCustom && durationMins === p.value;
-                        return (
-                          <button key={p.value} onClick={() => { setDurationMins(p.value); setShowCustom(false); }} style={{
-                            background: sel ? accent : "var(--color-background-secondary)",
-                            border: `1.5px solid ${sel ? accent : "var(--color-border-secondary)"}`,
-                            borderRadius: 10, padding: "10px 4px", cursor: "pointer", fontSize: 13,
-                            fontWeight: sel ? 600 : 400,
-                            color: sel ? "#fff" : "var(--color-text-primary)",
-                            textAlign: "center" as const,
-                          }}>{p.label}</button>
-                        );
-                      })}
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-                      <button onClick={() => { setShowCustom(true); setDurationMins(null); }} style={{
-                        background: showCustom ? accent : "var(--color-background-secondary)",
-                        border: `1.5px solid ${showCustom ? accent : "var(--color-border-secondary)"}`,
-                        borderRadius: 10, padding: "10px 14px", cursor: "pointer", fontSize: 13,
-                        fontWeight: showCustom ? 600 : 400,
-                        color: showCustom ? "#fff" : "var(--color-text-primary)",
-                        whiteSpace: "nowrap" as const,
-                      }}>Custom</button>
-                      {showCustom && (
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1 }}>
-                          <input
-                            type="number" min="1" max="240"
-                            value={customDuration}
-                            onChange={e => setCustomDuration(e.target.value)}
-                            placeholder="e.g. 70"
-                            style={{
-                              flex: 1, background: "var(--color-background-secondary)",
-                              border: "1.5px solid var(--color-border-secondary)",
-                              borderRadius: 10, padding: "10px 12px", fontSize: 15,
-                              color: "var(--color-text-primary)", outline: "none",
-                            }}
-                          />
-                          <span style={{ fontSize: 13, color: "var(--color-text-tertiary)" }}>min</span>
-                        </div>
-                      )}
-                    </div>
-                  </>
-                )}
-                <button
-                  onClick={handleAction}
-                  disabled={mode === "override" && !effectiveDuration}
-                  style={{
-                    width: "100%",
-                    background: (mode === "override" && !effectiveDuration) ? "var(--color-background-secondary)" : accent,
-                    border: "none",
-                    color: (mode === "override" && !effectiveDuration) ? "var(--color-text-tertiary)" : "#fff",
-                    borderRadius: 12, padding: "14px",
-                    cursor: (mode === "override" && !effectiveDuration) ? "not-allowed" : "pointer",
-                    fontSize: 15, fontWeight: 600,
-                  }}>
-                  {mode === "claim" ? "That's my load →" : effectiveDuration ? `Start ${effectiveDuration} min cycle →` : "Pick a duration first"}
+                <button onClick={handleAction} style={{ width: "100%", background: accent, border: "none", color: "#fff", borderRadius: 12, padding: "14px", cursor: "pointer", fontSize: 15, fontWeight: 600 }}>
+                  That's my load →
                 </button>
               </div>
             )}
 
-            {selected && mode === "clear" && (
+            {/* Override panel */}
+            {sel && mode === "override" && (
+              <div style={{ background: "var(--color-background-primary)", border: `0.5px solid ${accentBorder}`, borderRadius: "var(--border-radius-lg)", padding: "16px 20px" }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 12 }}>
+                  Mark as in use — your apt
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 16 }}>
+                  {UNITS.map(u => (
+                    <button key={u} onClick={() => setUnit(u)} style={{
+                      background: unit === u ? accent : "var(--color-background-secondary)",
+                      border: `1.5px solid ${unit === u ? accent : "var(--color-border-secondary)"}`,
+                      borderRadius: 10, padding: "12px 8px", cursor: "pointer", fontSize: 15,
+                      fontWeight: unit === u ? 600 : 400,
+                      color: unit === u ? "#fff" : "var(--color-text-primary)",
+                      textAlign: "center" as const,
+                    }}>{u}</button>
+                  ))}
+                </div>
+                <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-secondary)", textTransform: "uppercase" as const, letterSpacing: 1, marginBottom: 10 }}>
+                  Cycle duration
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6, marginBottom: 10 }}>
+                  {DURATION_PRESETS.map(p => (
+                    <button key={p.value} onClick={() => { setDurationMins(p.value); setShowCustom(false); }} style={{
+                      background: !showCustom && durationMins === p.value ? accent : "var(--color-background-secondary)",
+                      border: `1.5px solid ${!showCustom && durationMins === p.value ? accent : "var(--color-border-secondary)"}`,
+                      borderRadius: 10, padding: "10px 4px", cursor: "pointer", fontSize: 13,
+                      fontWeight: !showCustom && durationMins === p.value ? 600 : 400,
+                      color: !showCustom && durationMins === p.value ? "#fff" : "var(--color-text-primary)",
+                      textAlign: "center" as const,
+                    }}>{p.label}</button>
+                  ))}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+                  <button onClick={() => { setShowCustom(true); }} style={{
+                    background: showCustom ? accent : "var(--color-background-secondary)",
+                    border: `1.5px solid ${showCustom ? accent : "var(--color-border-secondary)"}`,
+                    borderRadius: 10, padding: "10px 14px", cursor: "pointer", fontSize: 13,
+                    fontWeight: showCustom ? 600 : 400,
+                    color: showCustom ? "#fff" : "var(--color-text-primary)",
+                    whiteSpace: "nowrap" as const,
+                  }}>Custom</button>
+                  {showCustom && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1 }}>
+                      <input
+                        type="number" min="1" max="240"
+                        value={customDuration}
+                        onChange={e => setCustomDuration(e.target.value)}
+                        placeholder="e.g. 70"
+                        style={{
+                          flex: 1, background: "var(--color-background-secondary)",
+                          border: "1.5px solid var(--color-border-secondary)",
+                          borderRadius: 10, padding: "10px 12px", fontSize: 15,
+                          color: "var(--color-text-primary)", outline: "none",
+                        }}
+                      />
+                      <span style={{ fontSize: 13, color: "var(--color-text-tertiary)" }}>min</span>
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={handleAction}
+                  disabled={effectiveDuration <= 0}
+                  style={{
+                    width: "100%",
+                    background: effectiveDuration > 0 ? accent : "var(--color-background-secondary)",
+                    border: "none",
+                    color: effectiveDuration > 0 ? "#fff" : "var(--color-text-tertiary)",
+                    borderRadius: 12, padding: "14px",
+                    cursor: effectiveDuration > 0 ? "pointer" : "not-allowed",
+                    fontSize: 15, fontWeight: 600,
+                  }}>
+                  {effectiveDuration > 0 ? `Start ${effectiveDuration} min cycle →` : "Pick a duration first"}
+                </button>
+              </div>
+            )}
+
+            {/* Clear panel */}
+            {sel && mode === "clear" && (
               <div style={{ background: "var(--color-background-primary)", border: "0.5px solid #FFCDD2", borderRadius: "var(--border-radius-lg)", padding: "16px 20px" }}>
                 <div style={{ fontSize: 14, color: "var(--color-text-primary)", marginBottom: 14 }}>
                   Clear the manual session for {m.label}?
@@ -355,7 +471,7 @@ function ClaimTab({ sessions, manuals, now, onClaim, onManualStart, onManualDone
                   <button onClick={() => handleClear(m.id)} style={{ flex: 1, background: "#E57373", border: "none", color: "#fff", borderRadius: 10, padding: "12px", cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
                     Yes, clear it
                   </button>
-                  <button onClick={() => { setSelectedMachineId(""); setMode(null); }} style={{ flex: 1, background: "var(--color-background-secondary)", border: "none", color: "var(--color-text-primary)", borderRadius: 10, padding: "12px", cursor: "pointer", fontSize: 14 }}>
+                  <button onClick={() => { setSelectedId(""); setMode(null); }} style={{ flex: 1, background: "var(--color-background-secondary)", border: "none", color: "var(--color-text-primary)", borderRadius: 10, padding: "12px", cursor: "pointer", fontSize: 14 }}>
                     Cancel
                   </button>
                 </div>
@@ -368,6 +484,7 @@ function ClaimTab({ sessions, manuals, now, onClaim, onManualStart, onManualDone
   );
 }
 
+// ── Message Board ─────────────────────────────────────────────────────────────
 function MessageBoard() {
   const [messages, setMessages] = useState<any[]>([]);
   const [text, setText] = useState("");
@@ -375,8 +492,7 @@ function MessageBoard() {
   const [posting, setPosting] = useState(false);
 
   useEffect(() => {
-    const messagesRef = ref(db, "messages");
-    const unsub = onValue(messagesRef, (snapshot) => {
+    const unsub = onValue(ref(db, "messages"), (snapshot) => {
       const data = snapshot.val() || {};
       const list = Object.entries(data)
         .map(([id, msg]: any) => ({ id, ...msg }))
@@ -401,19 +517,16 @@ function MessageBoard() {
       <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: "20px" }}>
         <div style={{ fontSize: 15, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 14 }}>Post a message</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 12 }}>
-          {UNITS.map(u => {
-            const selected = unit === u;
-            return (
-              <button key={u} onClick={() => { setUnit(u); localStorage.setItem("laundry-unit", u); }} style={{
-                background: selected ? "#1D9E75" : "var(--color-background-secondary)",
-                border: `1.5px solid ${selected ? "#1D9E75" : "var(--color-border-secondary)"}`,
-                borderRadius: 8, padding: "8px 4px", cursor: "pointer",
-                fontSize: 13, fontWeight: selected ? 600 : 400,
-                color: selected ? "#fff" : "var(--color-text-primary)",
-                textAlign: "center" as const,
-              }}>{u}</button>
-            );
-          })}
+          {UNITS.map(u => (
+            <button key={u} onClick={() => { setUnit(u); localStorage.setItem("laundry-unit", u); }} style={{
+              background: unit === u ? "#1D9E75" : "var(--color-background-secondary)",
+              border: `1.5px solid ${unit === u ? "#1D9E75" : "var(--color-border-secondary)"}`,
+              borderRadius: 8, padding: "8px 4px", cursor: "pointer",
+              fontSize: 13, fontWeight: unit === u ? 600 : 400,
+              color: unit === u ? "#fff" : "var(--color-text-primary)",
+              textAlign: "center" as const,
+            }}>{u}</button>
+          ))}
         </div>
         <textarea
           value={text} onChange={e => setText(e.target.value)}
@@ -457,14 +570,15 @@ function MessageBoard() {
   );
 }
 
+// ── How It Works ──────────────────────────────────────────────────────────────
 function HowItWorks() {
   const steps = [
-    { icon: "📡", title: "Fully automatic", body: "Each machine has a small sensor on it that detects when it's running. You don't need to press anything or sign in." },
+    { icon: "📡", title: "Fully automatic", body: "Each machine has a small sensor that detects when it's running. You don't need to press anything or sign in." },
     { icon: "🔄", title: "Running", body: "When a machine starts, the app updates automatically within seconds." },
-    { icon: "🧺", title: "Ready to grab", body: "When a cycle finishes and the machine stops vibrating, it flips to \"Ready to grab\" after a few minutes." },
+    { icon: "🧺", title: "Ready to grab", body: "When a cycle finishes and the machine stops vibrating, it flips to \"ready\" after a few minutes." },
     { icon: "🅿️", title: "Claim", body: "Use the Claim tab to attach your unit number to a sensor-detected cycle." },
-    { icon: "✋", title: "Override", body: "If the sensor missed your cycle, use \"Mark as mine\" in the Claim tab. Your manual session and the sensor session are independent — both show up if both exist." },
-    { icon: "📱", title: "Add to your home screen", body: "On iPhone: tap the share button (□↑) then \"Add to Home Screen\". On Android: tap the menu then \"Add to Home Screen\". It'll work like an app!" },
+    { icon: "✋", title: "Override", body: "If the sensor missed your cycle, tap \"Mark as mine\" in the Claim tab and set a duration. Your manual session and the sensor session are independent — both show if both exist." },
+    { icon: "📱", title: "Add to your home screen", body: "On iPhone: tap the share button (□↑) then \"Add to Home Screen\". On Android: tap the menu then \"Add to Home Screen\"." },
   ];
 
   return (
@@ -493,152 +607,17 @@ function HowItWorks() {
   );
 }
 
-function StatusBoard({ sessions, manuals, now }: any) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column" as const, gap: 12 }}>
-      <div style={{ background: "var(--color-background-primary)", border: "0.5px solid var(--color-border-tertiary)", borderRadius: "var(--border-radius-lg)", padding: 20 }}>
-        <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", letterSpacing: 2, textTransform: "uppercase" as const, marginBottom: 16 }}>Quick overview</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          {ALL_MACHINES.map((m: any) => {
-            const sensorSession = sessions[m.id];
-            const manualSession = manuals[m.id];
-            const sensorRunning = isRunning(sensorSession) && !isExpired(sensorSession, now);
-            const manualRunning = !!manualSession;
-            const isInUse = sensorRunning || manualRunning;
-            const isWasher = m.type === "washer";
-            const accent = isWasher ? "#1D9E75" : "#BA7517";
-            const accentLight = isWasher ? "#E1F5EE" : "#FAEEDA";
-            const accentBorder = isWasher ? "#9FE1CB" : "#FAC775";
-            // Use unit from manual session first, then sensor session
-            const displayUnit = manualSession?.unit || (manualSession ? null : sensorSession?.unit);
-
-            return (
-              <div key={m.id} style={{
-                background: isInUse ? accentLight : "var(--color-background-secondary)",
-                border: `0.5px solid ${isInUse ? accentBorder : "var(--color-border-tertiary)"}`,
-                borderRadius: "var(--border-radius-md)", padding: "14px 16px",
-                display: "flex", alignItems: "center", gap: 12,
-              }}>
-                <div style={{ width: 36, height: 36, borderRadius: 8, background: isInUse ? accentBorder : "var(--color-background-primary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>
-                  {isWasher ? "🫧" : "🌀"}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 500, color: "var(--color-text-primary)" }}>{m.label}</div>
-                  {isInUse ? (
-                    <>
-                      <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginTop: 1 }}>
-                        {displayUnit ? `Unit ${displayUnit}` : "unclaimed"}
-                        {sensorSession?.cycleNum ? ` · cycle ${sensorSession.cycleNum}` : manualSession?.cycleNum ? ` · cycle ${manualSession.cycleNum}` : ""}
-                      </div>
-                      <div style={{ fontSize: 12, color: accent, marginTop: 3, fontWeight: 500 }}>
-                        {sensorRunning && manualRunning
-                          ? `📡 ${formatRunning(sensorSession, now)} · ✋ ${formatRunning(manualSession, now)}`
-                          : sensorRunning
-                          ? `📡 ${formatRunning(sensorSession, now)}`
-                          : `✋ ${formatRunning(manualSession, now)}`}
-                      </div>
-                    </>
-                  ) : (
-                    <div style={{ fontSize: 12, color: "var(--color-text-tertiary)", marginTop: 2 }}>Available</div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Active sessions list */}
-      {ALL_MACHINES.some(m => {
-        const s = sessions[m.id]; const mn = manuals[m.id];
-        return (isRunning(s) && !isExpired(s, now)) || !!mn;
-      }) && (
-        <div>
-          <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", letterSpacing: 2, textTransform: "uppercase" as const, marginBottom: 12 }}>Active sessions</div>
-          {ALL_MACHINES.map((m: any) => {
-            const sensorSession = sessions[m.id];
-            const manualSession = manuals[m.id];
-            const sensorRunning = isRunning(sensorSession) && !isExpired(sensorSession, now);
-            const manualRunning = !!manualSession;
-            if (!sensorRunning && !manualRunning) return null;
-
-            const isWasher = m.type === "washer";
-            const accent = isWasher ? "#1D9E75" : "#BA7517";
-            const accentBorder = isWasher ? "#9FE1CB" : "#FAC775";
-            const progress = getProgress(sensorSession, now);
-            const remaining = getRemaining(sensorSession, now);
-            // Only show Done if sensor is actually running and has a duration timer
-            const done = sensorRunning ? isDone(sensorSession, now) : false;
-            const displayUnit = manualSession?.unit || (manualSession ? "" : (sensorSession?.unit || ""));
-
-            return (
-              <div key={m.id} style={{ background: "var(--color-background-primary)", border: `0.5px solid ${accentBorder}`, borderRadius: "var(--border-radius-md)", padding: "14px 16px", marginBottom: 8 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                  <div>
-                    <span style={{ fontWeight: 500, fontSize: 14, color: "var(--color-text-primary)" }}>{m.label}</span>
-                    {displayUnit
-                      ? <span style={{ color: "var(--color-text-tertiary)", fontSize: 12, marginLeft: 8 }}>Unit {displayUnit}</span>
-                      : <span style={{ color: "var(--color-text-tertiary)", fontSize: 12, marginLeft: 8 }}>unclaimed</span>}
-                    {(sensorSession?.cycleNum || manualSession?.cycleNum) &&
-                      <span style={{ color: "var(--color-text-tertiary)", fontSize: 12, marginLeft: 4 }}>
-                        · #{sensorSession?.cycleNum || manualSession?.cycleNum}
-                      </span>}
-                  </div>
-                  <div style={{ fontSize: 13, color: accent, fontWeight: 500 }}>
-                    {done ? "Done!" : remaining !== null ? formatTime(remaining) : "running"}
-                  </div>
-                </div>
-                {/* Sensor row */}
-                {sensorRunning && (
-                  <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginBottom: 2 }}>
-                    📡 sensor · {formatRunning(sensorSession, now)}
-                    {sensorSession?.unit ? ` · Unit ${sensorSession.unit}` : " · unclaimed"}
-                  </div>
-                )}
-                {/* Manual row */}
-                {manualRunning && (
-                  <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", marginBottom: 2 }}>
-                    ✋ manual · {formatRunning(manualSession, now)} · Unit {manualSession.unit}
-                  </div>
-                )}
-                {progress !== null && (
-                  <>
-                    <div style={{ height: 3, background: "var(--color-background-secondary)", borderRadius: 2, overflow: "hidden", marginTop: 8 }}>
-                      <div style={{ height: "100%", width: `${progress * 100}%`, background: accent, transition: "width 1s linear" }} />
-                    </div>
-                    <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", marginTop: 4, display: "flex", justifyContent: "space-between" }}>
-                      <span>{sensorSession?.cycleName}</span>
-                      <span>{Math.round(progress * 100)}% complete</span>
-                    </div>
-                  </>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {!ALL_MACHINES.some(m => {
-        const s = sessions[m.id]; const mn = manuals[m.id];
-        return (isRunning(s) && !isExpired(s, now)) || !!mn;
-      }) && (
-        <div style={{ textAlign: "center" as const, padding: "48px 24px", color: "var(--color-text-tertiary)", fontSize: 18 }}>
-          All machines are free ✦
-        </div>
-      )}
-    </div>
-  );
-}
-
+// ── Notification toast ────────────────────────────────────────────────────────
 function Notification({ note, onDismiss }: any) {
   useEffect(() => { const t = setTimeout(onDismiss, 6000); return () => clearTimeout(t); }, [onDismiss]);
   return (
-    <div style={{ position: "fixed" as const, bottom: 24, right: 24, background: "var(--color-background-primary)", border: "0.5px solid #9FE1CB", borderRadius: "var(--border-radius-lg)", padding: "14px 18px", fontSize: 13, color: "#0F6E56", maxWidth: 300, zIndex: 1000 }}>
+    <div style={{ position: "fixed" as const, bottom: 24, left: "50%", transform: "translateX(-50%)", background: "var(--color-background-primary)", border: "0.5px solid #9FE1CB", borderRadius: "var(--border-radius-lg)", padding: "14px 18px", fontSize: 13, color: "#0F6E56", maxWidth: 320, zIndex: 1000, textAlign: "center" as const }}>
       {note}
     </div>
   );
 }
 
+// ── App root ──────────────────────────────────────────────────────────────────
 export default function LaundryApp() {
   const [sessions, setSessions] = useState<any>({});
   const [manuals, setManuals] = useState<any>({});
@@ -647,43 +626,17 @@ export default function LaundryApp() {
   const [notified, setNotified] = useState<any>({});
   const [activeTab, setActiveTab] = useState("status");
   const [connected, setConnected] = useState(false);
-  const [lastCycleNums, setLastCycleNums] = useState<any>({});
-  const [lastStatuses, setLastStatuses] = useState<any>({});
 
+  // Sessions from firmware
   useEffect(() => {
     const unsub = onValue(ref(db, "sessions"), (snapshot) => {
-      const data = snapshot.val() || {};
-      setSessions(data);
+      setSessions(snapshot.val() || {});
       setConnected(true);
-      // Auto-clear stale unit when a new cycle starts OR status flips back to running
-      setLastCycleNums((prevCycles: any) => {
-        const nextCycles = { ...prevCycles };
-        setLastStatuses((prevStatuses: any) => {
-          const nextStatuses = { ...prevStatuses };
-          ALL_MACHINES.forEach(m => {
-            const s = data[m.id];
-            if (!s) return;
-            const newCycle = s.cycleNum;
-            const oldCycle = prevCycles[m.id];
-            const newStatus = s.status;
-            const oldStatus = prevStatuses[m.id];
-            // Clear unit if: new cycle number, OR status just flipped to running
-            const isNewCycle = newCycle && oldCycle && newCycle !== oldCycle;
-            const justStartedRunning = newStatus === "running" && oldStatus && oldStatus !== "running";
-            if ((isNewCycle || justStartedRunning) && s.unit) {
-              set(ref(db, `sessions/${m.id}/unit`), null);
-            }
-            if (newCycle) nextCycles[m.id] = newCycle;
-            if (newStatus) nextStatuses[m.id] = newStatus;
-          });
-          return nextStatuses;
-        });
-        return nextCycles;
-      });
     });
     return () => unsub();
   }, []);
 
+  // Manual overrides from app
   useEffect(() => {
     const unsub = onValue(ref(db, "manual"), (snapshot) => {
       setManuals(snapshot.val() || {});
@@ -700,18 +653,18 @@ export default function LaundryApp() {
     return () => clearInterval(interval);
   }, []);
 
+  // Done notifications
   useEffect(() => {
     ALL_MACHINES.forEach(m => {
-      const sensorSession = sessions[m.id];
-      const manualSession = manuals[m.id];
-      const sensorRunning = isRunning(sensorSession) && !isExpired(sensorSession, now);
-      const manualRunning = !!manualSession;
-      const isInUse = sensorRunning || manualRunning;
-      if (!isInUse) return;
-      const done = isDone(sensorSession, now);
+      const sensor = sessions[m.id];
+      const manual = manuals[m.id];
+      const sensorOn = isRunning(sensor) && !isExpired(sensor, now);
+      const manualOn = !!manual;
+      if (!sensorOn && !manualOn) return;
+      const done = sensorOn ? isDone(sensor, now) : false;
       if (done && !notified[m.id]) {
         setNotified((prev: any) => ({ ...prev, [m.id]: true }));
-        const unit = manualSession?.unit || sensorSession?.unit;
+        const unit = manual?.unit || sensor?.unit;
         const unitStr = unit ? `Unit ${unit} — ` : "";
         const msg = m.type === "washer"
           ? `🧺 ${unitStr}Washer done! Time to move to dryer.`
@@ -728,16 +681,17 @@ export default function LaundryApp() {
   }, [now, sessions, manuals, notified]);
 
   const handleClaim = useCallback((machineId: string, unit: string) => {
+    localStorage.setItem("laundry-unit", unit);
     set(ref(db, `sessions/${machineId}/unit`), unit);
   }, []);
 
-  const handleManualStart = useCallback(async (machineId: string, unit: string, durationMs: number | null) => {
+  const handleManualStart = useCallback(async (machineId: string, unit: string, durationMs: number) => {
     const cycleNum = await getNextCycleNumber();
     await set(ref(db, `manual/${machineId}`), {
       unit,
       startTime: Date.now(),
       cycleNum,
-      ...(durationMs ? { durationMs } : {}),
+      durationMs,
     });
   }, []);
 
@@ -746,7 +700,8 @@ export default function LaundryApp() {
   }, []);
 
   const activeMachines = ALL_MACHINES.filter(m => {
-    const s = sessions[m.id]; const mn = manuals[m.id];
+    const s = sessions[m.id];
+    const mn = manuals[m.id];
     return (isRunning(s) && !isExpired(s, now)) || !!mn;
   });
   const inUseCount = activeMachines.length;
@@ -771,6 +726,7 @@ export default function LaundryApp() {
         select, input, textarea { appearance: none; }
       `}</style>
 
+      {/* Header */}
       <div style={{ borderBottom: "0.5px solid var(--color-border-tertiary)", padding: "20px 24px", background: "var(--color-background-primary)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontFamily: "'Fraunces', serif", fontSize: 26, fontWeight: 300 }}>475 Laundry</div>
@@ -789,6 +745,7 @@ export default function LaundryApp() {
         </div>
       </div>
 
+      {/* Tabs */}
       <div style={{ display: "flex", borderBottom: "0.5px solid var(--color-border-tertiary)", padding: "0 16px", background: "var(--color-background-primary)", overflowX: "auto" as const }}>
         {tabs.map(tab => (
           <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
@@ -802,6 +759,7 @@ export default function LaundryApp() {
         ))}
       </div>
 
+      {/* Content */}
       <div style={{ padding: "20px" }}>
         {activeTab === "status" && <StatusBoard sessions={sessions} manuals={manuals} now={now} />}
         {activeTab === "claim" && (
@@ -816,8 +774,9 @@ export default function LaundryApp() {
         {activeTab === "howto" && <HowItWorks />}
       </div>
 
+      {/* Toast notifications */}
       {notifications.slice(-1).map((n: any) => (
-        <Notification key={n.id} note={n.msg} onDismiss={() => setNotifications((prev: any) => prev.filter((x: any) => x.id !== n.id))} />
+        <Notification key={n.id} note={n.msg} onDismiss={() => setNotifications(prev => prev.filter((x: any) => x.id !== n.id))} />
       ))}
     </div>
   );
