@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from “react”;
 import { initializeApp } from “firebase/app”;
 import { getDatabase, ref, onValue, set, remove, runTransaction, push } from “firebase/database”;
 
-// ── Firebase ──────────────────────────────────────────────────────────────────
+// - Firebase -
 const firebaseConfig = {
 apiKey: “AIzaSyAX8f3ITqqM-ubR41aALbWyuHzKO0hWqv0”,
 authDomain: “laundry-fd0a4.firebaseapp.com”,
@@ -15,7 +15,7 @@ appId: “1:859520322947:web:7a835161605325122cfab6”,
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getDatabase(firebaseApp);
 
-// ── Constants ─────────────────────────────────────────────────────────────────
+// - Constants -
 const ALL_MACHINES = [
 { id: “w1”, label: “Washer 1”, type: “washer” },
 { id: “w2”, label: “Washer 2”, type: “washer” },
@@ -30,7 +30,7 @@ const DURATION_PRESETS = [
 { label: “1:20”,   value: 80 },
 ];
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// - Helpers -
 async function getNextCycleNumber(): Promise<number> {
 const today = new Date().toISOString().slice(0, 10);
 const counterRef = ref(db, `cycleCounter/${today}`);
@@ -82,7 +82,7 @@ if (hrs < 24) return `${hrs}h ago`;
 return `${Math.floor(hrs / 24)}d ago`;
 }
 
-// ── Start Session Modal ───────────────────────────────────────────────────────
+// - Start Session Modal -
 function StartModal({ machine, onConfirm, onCancel }: any) {
 const [unit, setUnit] = useState(() => localStorage.getItem(“laundry-unit”) || UNITS[0]);
 const [durationMins, setDurationMins] = useState<number>(55);
@@ -184,7 +184,7 @@ Pick your unit and how long you need the machine.
         borderRadius: 12, padding: "15px", cursor: effectiveDuration > 0 ? "pointer" : "not-allowed",
         fontSize: 15, fontWeight: 600, marginBottom: 10,
       }}>
-      {effectiveDuration > 0 ? `Start ${effectiveDuration} min cycle →` : "Pick a duration"}
+      {effectiveDuration > 0 ? `Start ${effectiveDuration} min cycle ->` : "Pick a duration"}
     </button>
     <button onClick={onCancel} style={{
       width: "100%", background: "none", border: "none",
@@ -198,7 +198,7 @@ Pick your unit and how long you need the machine.
 );
 }
 
-// ── Clear Session Modal ───────────────────────────────────────────────────────
+// - Clear Session Modal -
 function ClearModal({ machine, session, onConfirm, onCancel }: any) {
 const isWasher = machine.type === “washer”;
 const accent = isWasher ? “#1D9E75” : “#BA7517”;
@@ -239,7 +239,7 @@ cursor: “pointer”, fontSize: 14, borderRadius: 12,
 );
 }
 
-// ── Status Board ──────────────────────────────────────────────────────────────
+// - Status Board -
 function StatusBoard({ sessions, now, onStart, onClear }: any) {
 const activeSessions = ALL_MACHINES.filter(m => !!sessions[m.id]);
 
@@ -367,7 +367,7 @@ return (
 );
 }
 
-// ── Message Board ─────────────────────────────────────────────────────────────
+// - Message Board -
 function MessageBoard() {
 const [messages, setMessages] = useState<any[]>([]);
 const [text, setText] = useState(””);
@@ -453,14 +453,14 @@ Unit {msg.unit}
 );
 }
 
-// ── How It Works ──────────────────────────────────────────────────────────────
+// - How It Works -
 function HowItWorks() {
 const steps = [
-{ icon: “🔧”, title: “A note from Libby”, body: “I gave up on the vibration sensors — too unreliable. But I have something new and cool cookin’. Stay tuned. In the meantime, enjoy this basic version.” },
+{ icon: “🔧”, title: “A note from Libby”, body: “I gave up on the vibration sensors - too unreliable. But I have something new and cool cookin’. Stay tuned. In the meantime, enjoy this basic version.” },
 { icon: “👆”, title: “Tap to claim”, body: “Tap any available machine on the Status tab, pick your unit number and how long you need it. The countdown starts immediately for everyone to see.” },
 { icon: “⏱️”, title: “Countdown”, body: “The app counts down your cycle in real time. When it hits zero the machine shows as done.” },
-{ icon: “✅”, title: “Clear when done”, body: “Tap a running machine to clear it when your laundry is done. Anyone can clear — just be a good neighbor.” },
-{ icon: “💬”, title: “Messages”, body: “Leave notes for your neighbors in the Messages tab — heads up about a long cycle, asking someone to move their stuff, whatever.” },
+{ icon: “✅”, title: “Clear when done”, body: “Tap a running machine to clear it when your laundry is done. Anyone can clear - just be a good neighbor.” },
+{ icon: “💬”, title: “Messages”, body: “Leave notes for your neighbors in the Messages tab - heads up about a long cycle, asking someone to move their stuff, whatever.” },
 { icon: “📱”, title: “Add to your home screen”, body: “On iPhone: tap the share button (□↑) then "Add to Home Screen". On Android: tap the menu then "Add to Home Screen". It works like an app!” },
 ];
 
@@ -495,7 +495,7 @@ display: “flex”, gap: 16, alignItems: “flex-start”,
 );
 }
 
-// ── Notification toast ────────────────────────────────────────────────────────
+// - Notification toast -
 function Notification({ note, onDismiss }: any) {
 useEffect(() => { const t = setTimeout(onDismiss, 6000); return () => clearTimeout(t); }, [onDismiss]);
 return (
@@ -511,7 +511,7 @@ textAlign: “center” as const, whiteSpace: “nowrap” as const,
 );
 }
 
-// ── App Root ──────────────────────────────────────────────────────────────────
+// - App Root -
 export default function LaundryApp() {
 const [sessions, setSessions] = useState<any>({});
 const [now, setNow] = useState(Date.now());
@@ -561,7 +561,7 @@ const remaining = getRemaining(s, now);
 const done = remaining !== null && remaining <= 0;
 if (done && !notified[m.id]) {
 setNotified((prev: any) => ({ …prev, [m.id]: true }));
-const unitStr = s.unit ? `Unit ${s.unit} — ` : “”;
+const unitStr = s.unit ? `Unit ${s.unit} - ` : “”;
 const msg = m.type === “washer”
 ? `🧺 ${unitStr}Washer done! Time to move to dryer.`
 : `✅ ${unitStr}Dryer done! Grab your laundry.`;
