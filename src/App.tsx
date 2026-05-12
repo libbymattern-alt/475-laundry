@@ -91,7 +91,7 @@ function StartModal({ machine, onConfirm, onCancel }: any) {
 
   return (
     <div style={{ position: "fixed" as const, inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 2000 }}>
-      <div style={{ background: "var(--color-background-primary)", borderRadius: "20px 20px 0 0", padding: "24px 20px 44px", width: "100%", maxWidth: 480 }}>
+      <div style={{ background: "var(--color-background-primary)", borderRadius: "20px 20px 0 0", padding: "24px 20px 44px", width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto" as const }}>
         <div style={{ fontSize: 19, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 4 }}>{machine.label}</div>
         <div style={{ fontSize: 13, color: "var(--color-text-secondary)", marginBottom: 20 }}>Pick your unit and how long you need the machine.</div>
 
